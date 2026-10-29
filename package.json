@@ -1,0 +1,56 @@
+{
+  "name": "foragix",
+  "version": "0.1.0",
+  "description": "Agent Skill providing Search and Fetch over multiple providers, with a free-quota pool and automatic failover.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "bin": {
+    "foragix": "bin/foragix.mjs"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "sql",
+    "SKILL.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "integrity": "node scripts/check-comment-integrity.mjs",
+    "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
+    "test:only": "node --test \"dist/test/**/*.test.js\""
+  },
+  "dependencies": {
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3"
+  },
+  "license": "MIT",
+  "author": "ikelvingo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ikelvingo/foragix.git"
+  },
+  "keywords": [
+    "agent",
+    "skill",
+    "search",
+    "fetch",
+    "web-search",
+    "failover",
+    "quota",
+    "mcp-alternative",
+    "llm-tools",
+    "sqlite"
+  ],
+  "homepage": "https://github.com/ikelvingo/foragix#readme",
+  "bugs": {
+    "url": "https://github.com/ikelvingo/foragix/issues"
+  }
+}

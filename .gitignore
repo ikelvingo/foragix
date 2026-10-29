@@ -1,0 +1,32 @@
+# Dependencies and build output
+node_modules/
+dist/
+
+# Design documents and process artifacts — not part of the published source.
+# The design docs live outside this repository; see README.md.
+documents/
+outputs/
+res/
+
+# Process files: local working conventions, not product source
+AGENTS.MD
+.agents/
+.gemini/
+
+# Generated visualisations from ad-hoc tooling
+*.html
+
+# Credentials must never enter the repository
+*.env
+credentials*.env
+.env*
+
+# Local noise
+*.log
+*.tmp
+
+# Publish artifacts
+*.tgz
+
+# Runtime state written inside the skill directory
+data/
