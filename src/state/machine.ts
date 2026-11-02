@@ -5,7 +5,7 @@
  * credentials, paid gate) recover on an event; transient bits (network, short-window limiting)
  * recover when `retry_after` expires. All resets are lazy — decided before each call, no timer.
  */
-import type { SqliteAdapter } from '../db/sqlite.js';
+import type { SqliteAdapter, ProviderRow } from '../db/sqlite.js';
 import { BIT, LEGACY_BIT_MASK, decodeReasons, type Reason } from '../db/bits.js';
 import { DEFAULT_TIMEZONE, periodKeys } from '../db/period.js';
 
@@ -27,6 +27,9 @@ export interface ResetOutcome {
   reasonsBefore: Reason[];
   /** Whether it is usable after the reset. */
   usableAfter: boolean;
+  /** The post-gate row snapshot: one read, reused by the single-pass routing caller.
+   *  Null only on the early-exit path (invalid resetTimezone) where the caller re-reads. */
+  rowAfter: ProviderRow | null;
 }
 
 /**
@@ -109,10 +112,12 @@ export function applyResets(adapter: SqliteAdapter, providerId: string, ctx: Res
   }
 
   const after = adapter.getProvider(providerId);
+  if (after === null) throw new Error(`provider_state row missing after resets: ${providerId}`);
   return {
     periodResets,
     reasonsBefore,
-    usableAfter: after !== null && after.is_available === 0,
+    usableAfter: after.is_available === 0,
+    rowAfter: after,
   };
 }
 

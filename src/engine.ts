@@ -13,6 +13,7 @@ import { BIT, decodeReasons, type Reason } from './db/bits.js';
 import { dayKey, isValidTimezone, monthKey, DEFAULT_TIMEZONE } from './db/period.js';
 import { applyResets } from './state/machine.js';
 import { planSelection, type Candidate } from './routing/select.js';
+import type { ResetOutcome } from './state/machine.js';
 import { effectiveAllowPaid } from './config/load.js';
 import type { Config, IsolatedProvider, ProviderConfig } from './config/types.js';
 import type { CredentialView } from './credentials/load.js';
@@ -200,8 +201,8 @@ export class Engine {
   // ---------------------------------------------------------------------------
 
 
-  /** Perform a lazy reset for a single provider (period boundary, cooldown expiry, credential change, paid gate). */
-  private applyResetsFor(provider: ProviderConfig, adapter: ProviderAdapter): void {
+  /** Perform a lazy reset for a single provider (period boundary, cooldown expiry, credential change, legacy cleanup). */
+  private applyResetsFor(provider: ProviderConfig, adapter: ProviderAdapter): ResetOutcome {
     const now = this.deps.now();
     const required = provider.credentials.filter((c) => c.required).map((c) => c.name);
     const credentialsPresent = required.every((name) => this.deps.credentials.has(name));
@@ -219,50 +220,49 @@ export class Engine {
         kind: 'migration',
         detail: `invalid resetTimezone (${redact(init.resetTimezone, 40)}), the period boundary cannot be determined, stopping automatic use`,
       });
-      return;
+      const rowNow = this.deps.db.getProvider(provider.id);
+      return {
+        periodResets: [],
+        reasonsBefore: rowNow === null ? [] : decodeReasons(rowNow.is_available),
+        usableAfter: rowNow !== null && rowNow.is_available === 0,
+        rowAfter: rowNow,
+      };
     }
 
-    applyResets(this.deps.db, provider.id, { now, credentialsPresent, credentialFingerprint: fingerprint, allowPaid });
+    return applyResets(this.deps.db, provider.id, { now, credentialsPresent, credentialFingerprint: fingerprint, allowPaid });
   }
 
-  /** Reset every provider. A provider failing only affects itself — it is recorded in the returned set. */
-  private refreshAll(): { failed: Set<string> } {
+  /**
+   * Single-pass read: run the per-provider gates AND assemble the routing candidates in the
+   * same scan. Providers that threw are recorded in `failed` (excluded from candidates);
+   * `refreshAll` remains for the status path only.
+   */
+  private refreshAndCandidates(exclude: ReadonlySet<string>): { failed: Set<string>; candidates: Candidate[] } {
     const failed = new Set<string>();
+    const candidates: Candidate[] = [];
     for (const provider of this.deps.config.providers) {
       const adapter = this.deps.adapters.get(provider.id);
       if (adapter === undefined) continue;
+      let row: ProviderRow | null;
       try {
-        this.deps.db.transaction(() => {
-            this.applyResetsFor(provider, adapter);
-        });
+        const outcome: ResetOutcome = this.deps.db.transaction(() => this.applyResetsFor(provider, adapter));
+        // The early-exit path (invalid resetTimezone) may carry a null snapshot — the row
+        // itself still exists on disk from bootstrap.
+        row = outcome.rowAfter ?? this.deps.db.getProvider(provider.id);
       } catch (err) {
         failed.add(provider.id);
         this.deps.onDiagnostic?.('refresh_failed', { providerId: provider.id, error: describeError(err) });
+        continue;
       }
-    }
-    return { failed };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Candidates and context
-  // ---------------------------------------------------------------------------
-
-  /** Assemble the routing candidates. Pure read. Throws on read failure, and the caller fails closed. */
-  private candidates(exclude: ReadonlySet<string>): Candidate[] {
-    const out: Candidate[] = [];
-    for (const provider of this.deps.config.providers) {
-      if (exclude.has(provider.id)) continue;
-      const adapter = this.deps.adapters.get(provider.id);
-      if (adapter === undefined) continue;
-      const row = this.deps.db.getProvider(provider.id);
       if (row === null) continue;
-      // The legacy credential-missing bit is retired: presence is derived here, at routing
-      // read time, from the same config×credentials pair the adapters would consult.
+      if (exclude.has(provider.id)) continue;
+      // The legacy credential-missing bit is retired: presence is derived on the same pass,
+      // from the same config×credentials pair the adapters would consult.
       const allRequiredPresent = provider.credentials
         .filter((c) => c.required)
         .every((c) => this.deps.credentials.has(c.name));
       if (!allRequiredPresent) continue;
-      out.push({
+      candidates.push({
         providerId: provider.id,
         priority: provider.priority,
         isEnable: row.is_enable === 1,
@@ -270,8 +270,13 @@ export class Engine {
         capabilities: adapter.capabilities,
       });
     }
-    return out;
+    return { failed, candidates };
   }
+
+  // ---------------------------------------------------------------------------
+  // Candidates and context
+  // ---------------------------------------------------------------------------
+
 
   private contextFor(provider: ProviderConfig, adapter: ProviderAdapter): AdapterContext {
     return {
@@ -419,15 +424,11 @@ export class Engine {
   ): Promise<{ ok: true; provider: string; data: T } | FailureReport> {
     // Reset. A failure means this provider's state is untrustworthy for this round → do not call it (fail-closed)
     let failed: Set<string>;
-    try {
-      failed = this.refreshAll().failed;
-    } catch (err) {
-      return this.storageFailure(capability, describeError(err));
-    }
-
     let candidates: Candidate[];
     try {
-      candidates = this.candidates(failed);
+      const merged = this.refreshAndCandidates(new Set<string>());
+      failed = merged.failed;
+      candidates = merged.candidates;
     } catch (err) {
       return this.storageFailure(capability, describeError(err));
     }
@@ -684,6 +685,11 @@ export class Engine {
     });
     if (!result.ok) return result;
     return { ok: true, data: result.data };
+  }
+
+  /** Status path: run the same single pass without candidate filtering. */
+  private refreshAll(): { failed: Set<string> } {
+    return { failed: this.refreshAndCandidates(new Set<string>()).failed };
   }
 
   /** State report. A read-only view for the LLM — not a CLI for humans. */
