@@ -151,10 +151,14 @@ export class Engine {
     // credentials sees 'none'; treating 'none' ↔ a real key as a change would brick the provider
     // for good the first time it boots unauthenticated. Only a real key switching to a different
     // real key is a billing-pool change.
+    // The pool identity is compared by its SEMANTIC component — the credential fingerprint —
+    // never by the serialized string: a poolId composition revision (serializer change) must
+    // not be read as a billing-pool change. The serialization difference is repaired by
+    // writeStatic below; the fingerprint is the only part whose change can mean the counters
+    // stopped being comparable.
     const oldFingerprint = row.pool_id === null ? 'none' : (row.pool_id.split('|')[1] ?? 'none');
     const newFingerprint = poolId.split('|')[1] ?? 'none';
-    const poolChanged =
-      row.pool_id !== null && row.pool_id !== poolId && oldFingerprint !== 'none' && newFingerprint !== 'none';
+    const poolChanged = oldFingerprint !== 'none' && newFingerprint !== 'none' && oldFingerprint !== newFingerprint;
     if (!versionChanged && !accountChanged && !poolChanged) return;
 
     const unitChanged = row.unit !== null && row.unit !== init.unit;
