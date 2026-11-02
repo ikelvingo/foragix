@@ -14,7 +14,6 @@ import { dayKey, isValidTimezone, monthKey, DEFAULT_TIMEZONE } from './db/period
 import { applyResets } from './state/machine.js';
 import { planSelection, type Candidate } from './routing/select.js';
 import type { ResetOutcome } from './state/machine.js';
-import { effectiveAllowPaid } from './config/load.js';
 import type { Config, IsolatedProvider, ProviderConfig } from './config/types.js';
 import type { CredentialView } from './credentials/load.js';
 import { backoffMs, clampCooldown, type Classification } from './errors/classify.js';
@@ -207,7 +206,6 @@ export class Engine {
     const required = provider.credentials.filter((c) => c.required).map((c) => c.name);
     const credentialsPresent = required.every((name) => this.deps.credentials.has(name));
     const fingerprint = this.deps.credentials.fingerprint(required);
-    const allowPaid = effectiveAllowPaid(this.deps.config, provider);
 
     // An invalid timezone makes period key computation throw. **Decide at the load phase**, rather than blowing up at request time.
     const init = adapter.init(provider.account);
@@ -229,7 +227,7 @@ export class Engine {
       };
     }
 
-    return applyResets(this.deps.db, provider.id, { now, credentialsPresent, credentialFingerprint: fingerprint, allowPaid });
+    return applyResets(this.deps.db, provider.id, { now, credentialsPresent, credentialFingerprint: fingerprint });
   }
 
   /**

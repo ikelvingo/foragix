@@ -21,12 +21,13 @@ const PRIORITY_STEP = 10;
  * Every registered adapter, enabled, ordered by registry position.
  *
  * `allowPaid` is left null so each provider inherits the top-level `allowPaid: false`: providers
- * that can incur charges stay behind the paid gate until the user says otherwise.
+ * that depend on account-side setup (defaultEnabled false) stay off until the owner enables them.
  */
 export function buildDefaultConfig(adapters: readonly ProviderAdapter[]): Config {
   const providers: ProviderConfig[] = adapters.map((adapter, index) => ({
     id: adapter.id,
-    enabled: true,
+    // Source-side default; an explicit value in the user's config always wins.
+    enabled: adapter.schema.defaultEnabled ?? true,
     priority: (index + 1) * PRIORITY_STEP,
     // The adapter's own canonical names; the config may only ever name variables, never values.
     credentials: adapter.schema.credentialNames.map((name) => ({ name, required: true })),

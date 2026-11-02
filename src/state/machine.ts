@@ -17,7 +17,6 @@ export interface ResetContext {
   /** Credential fingerprint; null means it cannot be computed (credentials incomplete). */
   credentialFingerprint: string | null;
   /** Legacy plumbing; the paid gate is retired and this value no longer alters any behavior. */
-  allowPaid: boolean;
 }
 
 export interface ResetOutcome {
