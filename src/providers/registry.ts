@@ -8,8 +8,10 @@ import type { ProviderAdapter } from './types.js';
 import type { ProviderSchema, SchemaLookup } from '../config/types.js';
 import { tavilyAdapter } from './tavily/index.js';
 import { exaAdapter } from './exa/index.js';
+import { braveAdapter } from './brave/index.js';
+import { minimaxAdapter } from './minimax/index.js';
 
-export const ADAPTERS: readonly ProviderAdapter[] = [tavilyAdapter, exaAdapter];
+export const ADAPTERS: readonly ProviderAdapter[] = [tavilyAdapter, exaAdapter, braveAdapter, minimaxAdapter];
 
 /**
  * Providers that are verified but not yet implemented, or whose shape is not yet verified.
@@ -20,7 +22,6 @@ export const ADAPTERS: readonly ProviderAdapter[] = [tavilyAdapter, exaAdapter];
  */
 export const NOT_IMPLEMENTED: ReadonlyArray<{ id: string; reason: string }> = [
   { id: 'anysearch', reason: 'in fact-checking both the endpoint and the credential description are "unconfirmed"; must not be implemented on a guess' },
-  { id: 'brave', reason: 'capability and endpoint verified; adapter still to be implemented' },
   { id: 'firecrawl', reason: 'capability and endpoint verified; adapter still to be implemented' },
   { id: 'deepseek', reason: 'verified 2026-10-28; billing per successful request was announced to start 2026-11-01, so the default stance of the paid gate must be decided first' },
   { id: 'searxng', reason: 'self-hosted software with no platform-wide quota; the source of the instance address must be decided first' },
