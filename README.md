@@ -5,7 +5,7 @@ foragix is a web-search and page-fetch tool for AI agents: it pools the free quo
 ## Quick start
 
 ```bash
-npx skills add ikelvingo/foragix
+npx skills add ikelvingo/foragix -g
 export TAVILY_API_KEY=<your key>
 ```
 Once installed, the agent uses it through `SKILL.md`; run `status` any time to check the install and missing keys.
