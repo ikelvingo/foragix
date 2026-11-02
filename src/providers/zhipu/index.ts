@@ -34,9 +34,9 @@ interface ZhipuReaderResponse {
   reader_result?: { content?: string; description?: string; title?: string; url?: string };
 }
 
-function authHeaders(ctx: AdapterContext): Record<string, string> {
-  const key = ctx.credentials.get(CREDENTIAL);
-  if (key === null) throw new Error('ZHIPU_API_KEY is missing; the routing layer should have excluded this provider');
+function authHeaders(ctx: AdapterContext, credentialName: string): Record<string, string> {
+  const key = ctx.credentials.get(credentialName);
+  if (key === null) throw new Error(`${credentialName} is missing; the routing layer should have excluded this provider`);
   return { authorization: `Bearer ${key}` };
 }
 
@@ -67,6 +67,10 @@ export function zhipuAdapterFor(id: 'zhipu' | 'zhipu_ai', opts: { defaultBaseUrl
 }
 
 function zhipuAdapterForRegion(id: 'zhipu' | 'zhipu_ai', defaultHost: string, defaultEngine: string): ProviderAdapter {
+  // Four base urls → four credential variables; z.ai keys are minted on the z.ai console and
+  // are NOT interchangeable with bigmodel.cn keys (region-split review ruling).
+  const credentialName = id === 'zhipu' ? 'ZHIPU_API_KEY' : 'ZAI_API_KEY';
+
   return {
     id,
     capabilities: ['search', 'fetch'],
@@ -78,7 +82,7 @@ function zhipuAdapterForRegion(id: 'zhipu' | 'zhipu_ai', defaultHost: string, de
     // verify (minimax plan key, zhipu resource pack, deepseek per-call billing). Fresh
     // installs must not call it until the owner enables it in the config.
     defaultEnabled: false,
-    credentialNames: [CREDENTIAL],
+    credentialNames: [credentialName],
     // Region switch: CN by default (open.bigmodel.cn carries the standalone REST tool
     // endpoint); overseas z.ai accounts override via this config field. Same body/auth/shape.
     accountOptions: {
@@ -121,7 +125,7 @@ function zhipuAdapterForRegion(id: 'zhipu' | 'zhipu_ai', defaultHost: string, de
     const count = req.maxResults === undefined ? undefined : Math.min(MAX_COUNT, Math.max(1, req.maxResults));
     const result = await request(ctx.fetchImpl, `${baseUrl(ctx, defaultHost)}/web_search`, {
       method: 'POST',
-      headers: authHeaders(ctx),
+      headers: authHeaders(ctx, credentialName),
       json: {
         // Hardcoded request shape: base engine, no intent pre-recognition (extra latency).
         search_query: req.query.slice(0, MAX_QUERY_CHARS),
@@ -158,7 +162,7 @@ function zhipuAdapterForRegion(id: 'zhipu' | 'zhipu_ai', defaultHost: string, de
   async fetch(ctx, req): Promise<AdapterOutcome<FetchDocument>> {
     const result = await request(ctx.fetchImpl, `${baseUrl(ctx, defaultHost)}/reader`, {
       method: 'POST',
-      headers: authHeaders(ctx),
+      headers: authHeaders(ctx, credentialName),
       json: { url: req.url },
     });
     if (!result.ok) return result;

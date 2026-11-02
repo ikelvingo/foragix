@@ -324,6 +324,7 @@ export class Engine {
     // because the stored boundary pre-empts further probes. The probe is a NETWORK call and
     // must run before the transaction (no write tx is ever held across a network request).
     if (classification.kind === 'quota' && classification.period === null) {
+      console.error('LANEA', providerId, 'kind', classification.kind, 'stored', this.deps.db.readVendorReset(providerId), 'declared', classification.resetAt, 'probe?', adapter.probeReset !== undefined);
       const stored = this.deps.db.readVendorReset(providerId);
       const declared = classification.resetAt;
       if (stored === null && declared === undefined && adapter.probeReset !== undefined) {

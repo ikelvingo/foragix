@@ -16,10 +16,10 @@ import assert from 'node:assert/strict';
 import { makeEngine } from './engine.test.js';
 import { BIT } from '../src/db/bits.js';
 import { zhipuAdapter } from '../src/providers/zhipu/index.js';
-import { minimaxAdapter } from '../src/providers/minimax/index.js';
+import { minimaxCnAdapter } from '../src/providers/minimax/index.js';
 import { braveAdapter } from '../src/providers/brave/index.js';
 const braveAdapterForTests = braveAdapter;
-const minimaxAdapterForTests = minimaxAdapter;
+const minimaxAdapterForTests = minimaxCnAdapter;
 
 const t0 = Date.UTC(2026, 10, 3, 12, 0, 0); // 2026-11-03 12:00 UTC
 
@@ -92,15 +92,15 @@ test('minimax lane A: refusal probes the plan read once and persists the declare
   const boundary = t0 + 60 * 60 * 1000; // the vendor window ends one hour later
   const h = makeEngine({
     now: () => clock.now,
-    yaml: 'version: 1\nproviders:\n  - id: minimax\n    enabled: true\n    credentials:\n      - name: MINIMAX_API_KEY\n        required: true\n    account: {}\n',
+    yaml: 'version: 1\nproviders:\n  - id: minimax_cn\n    enabled: true\n    credentials:\n      - name: MINIMAX_API_KEY\n        required: true\n    account: {}\n',
     adapters: [minimaxAdapterForTests],
     env: { MINIMAX_API_KEY: 'k-mm' },
     routes: {
-      'https://api.minimax.io/v1/coding_plan/search': {
+      'https://api.minimax.cn/v1/coding_plan/search': {
         status: 200,
         body: JSON.stringify({ base_resp: { status_code: 1028, status_msg: 'quota exhausted' } }),
       },
-      'https://api.minimax.io/v1/token_plan/remains': {
+      'https://api.minimax.cn/v1/token_plan/remains': {
         status: 200,
         body: JSON.stringify({ model_remains: [{ model_name: 'general', end_time: boundary }, { model_name: 'video', end_time: boundary }] }),
       },
@@ -109,8 +109,8 @@ test('minimax lane A: refusal probes the plan read once and persists the declare
 
   const first = await h.engine.search({ query: 'q' });
   assert.equal(first.ok, false);
-  assert.equal(h.db.readVendorReset('minimax'), boundary, 'the declared boundary is persisted once');
-  assert.notEqual((h.db.getProvider('minimax')?.is_available ?? 0) & BIT.QUOTA_UNKNOWN, 0);
+  assert.equal(h.db.readVendorReset('minimax_cn'), boundary, 'the declared boundary is persisted once');
+  assert.notEqual((h.db.getProvider('minimax_cn')?.is_available ?? 0) & BIT.QUOTA_UNKNOWN, 0);
 
   // Beyond the vendor boundary the gate clears the bit and the provider re-enters the pool.
   // The (fixed) vendor read now reports an outlived window: the engine degrades to
@@ -118,7 +118,7 @@ test('minimax lane A: refusal probes the plan read once and persists the declare
   clock.now = boundary + 1000;
   const second = await h.engine.search({ query: 'q' });
   assert.equal(second.ok, false);
-  assert.notEqual((h.db.getProvider('minimax')?.is_available ?? 0) & BIT.QUOTA_UNKNOWN, 0, 'still refusing without a declared live boundary');
+  assert.notEqual((h.db.getProvider('minimax_cn')?.is_available ?? 0) & BIT.QUOTA_UNKNOWN, 0, 'still refusing without a declared live boundary');
   assert.equal(h.db.readVendorReset('minimax'), null, 'no fabricated reset time is stored');
   h.close();
 });

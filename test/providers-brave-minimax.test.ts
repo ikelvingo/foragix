@@ -7,7 +7,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AdapterContext, AdapterOutcome, ProviderAdapter, SearchHit } from '../src/providers/types.js';
 import { braveAdapter } from '../src/providers/brave/index.js';
-import { minimaxAdapter } from '../src/providers/minimax/index.js';
+import { minimaxCnAdapter } from '../src/providers/minimax/index.js';
+const minimaxAdapter = minimaxCnAdapter;
 import type { CredentialPresence } from '../src/credentials/load.js';
 import type { ProviderErrorHints } from '../src/errors/classify.js';
 
@@ -126,7 +127,7 @@ test('minimax search sends q to the coding plan endpoint with bearer auth', asyn
     assert.equal(outcome.usage, 1);
   }
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]!.url, 'https://api.minimax.io/v1/coding_plan/search');
+  assert.equal(calls[0]!.url, 'https://api.minimax.cn/v1/coding_plan/search');
   assert.equal(calls[0]!.method, 'POST');
   assert.equal(calls[0]!.headers.authorization, 'Bearer fake-value-for-MINIMAX_API_KEY');
   assert.deepEqual(JSON.parse(calls[0]!.body ?? '{}'), { q: 'hello world' });
@@ -141,6 +142,7 @@ test('minimax ignores maxResults — the endpoint has no pagination', async () =
 
 test('minimax declares the search capability only', () => {
   assert.deepEqual(minimaxAdapter.capabilities, ['search']);
+  assert.equal(minimaxAdapter.schema.credentialNames[0], 'MINIMAX_API_KEY', 'the CN twin keeps the owner key name');
   assert.equal(minimaxAdapter.fetch, undefined);
 });
 

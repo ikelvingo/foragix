@@ -34,18 +34,20 @@ interface MinimaxSearchResponse {
 /** Moderation / plan-scope envelope codes that are not quota: no flags, surfaced prominently. */
 const OUR_PROBLEM_CODES = new Set([1002, 1039, 1026, 1027, 2061]);
 
-function authHeaders(ctx: AdapterContext): Record<string, string> {
-  const key = ctx.credentials.get(CREDENTIAL);
-  if (key === null) throw new Error('MINIMAX_API_KEY is missing; the routing layer should have excluded this provider');
+function authHeaders(ctx: AdapterContext, credentialName: string): Record<string, string> {
+  const key = ctx.credentials.get(credentialName);
+  if (key === null) throw new Error(`${credentialName} is missing; the routing layer should have excluded this provider`);
   return { authorization: `Bearer ${key}` };
 }
 
-function baseUrl(ctx: AdapterContext): string {
+function baseUrl(ctx: AdapterContext, id: 'minimax' | 'minimax_cn'): string {
   const raw = ctx.config.account['base_url'];
   if (typeof raw === 'string' && raw !== '') {
     return raw.replace(/\/+$/, '');
   }
-  return DEFAULT_BASE_URL;
+  // Region-aware fallback: the config parser materializes explicit account fields only, so
+  // an emptied `account: {}` must still land on the id's own regional host (CN twin → CN).
+  return id === 'minimax_cn' ? 'https://api.minimax.cn' : DEFAULT_BASE_URL;
 }
 
 export function minimaxAdapterFor(id: 'minimax' | 'minimax_cn'): ProviderAdapter {
@@ -53,6 +55,10 @@ export function minimaxAdapterFor(id: 'minimax' | 'minimax_cn'): ProviderAdapter
 }
 
 function minimaxAdapterForRegion(id: 'minimax' | 'minimax_cn'): ProviderAdapter {
+  // Four base urls → four credential variables: keys are NOT interchangeable across regions
+  // (owner ruling after the region-split review); the CN twin keeps the existing export.
+  const credentialName = id === 'minimax_cn' ? 'MINIMAX_API_KEY' : 'MINIMAX_GLOBAL_API_KEY';
+
   return {
     id,
   capabilities: ['search'],
@@ -64,7 +70,7 @@ function minimaxAdapterForRegion(id: 'minimax' | 'minimax_cn'): ProviderAdapter 
     // verify (minimax plan key, zhipu resource pack, deepseek per-call billing). Fresh
     // installs must not call it until the owner enables it in the config.
     defaultEnabled: false,
-    credentialNames: [CREDENTIAL],
+    credentialNames: [credentialName],
     accountOptions: {
       base_url: {
         type: 'string',
@@ -102,9 +108,9 @@ function minimaxAdapterForRegion(id: 'minimax' | 'minimax_cn'): ProviderAdapter 
    * the future; anything unusable degrades to null (QUOTA_UNKNOWN instead of a guess).
    */
   async probeReset(ctx: AdapterContext): Promise<number | null> {
-    const result = await request(ctx.fetchImpl, `${baseUrl(ctx)}/v1/token_plan/remains`, {
+    const result = await request(ctx.fetchImpl, `${baseUrl(ctx, id)}/v1/token_plan/remains`, {
       method: 'GET',
-      headers: authHeaders(ctx),
+      headers: authHeaders(ctx, credentialName),
     });
     if (!result.ok) return null;
     const parsed = parseJson<{ model_remains?: Array<{ model_name?: string; end_time?: number }> }>(result.data.body);
@@ -116,9 +122,9 @@ function minimaxAdapterForRegion(id: 'minimax' | 'minimax_cn'): ProviderAdapter 
   },
 
   async search(ctx, req): Promise<AdapterOutcome<SearchHit[]>> {
-    const result = await request(ctx.fetchImpl, `${baseUrl(ctx)}/v1/coding_plan/search`, {
+    const result = await request(ctx.fetchImpl, `${baseUrl(ctx, id)}/v1/coding_plan/search`, {
       method: 'POST',
-      headers: authHeaders(ctx),
+      headers: authHeaders(ctx, credentialName),
       json: { q: req.query },
     });
     if (!result.ok) return result;
