@@ -108,6 +108,15 @@ export const zhihuAdapter: ProviderAdapter = {
     if (parsed === null) return { ok: false, classification: classifyParseFailure('zhihu search body is not JSON') };
 
     if (typeof parsed.Code === 'number' && parsed.Code !== 0) {
+      // Since the envelope arrives on HTTP 200, the hints cannot match it (a capitalized
+      // Code key is not tested by the extractor); semantics are verified per-code.
+      if (parsed.Code === 20001) {
+        // Verified live: an authentication failure of the Access Secret.
+        return {
+          ok: false,
+          classification: { kind: 'credential_rejected', evidence: 'zhihu envelope Code=20001 (access-secret rejected)' },
+        };
+      }
       return {
         ok: false,
         classification: {

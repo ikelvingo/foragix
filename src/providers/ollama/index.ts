@@ -63,10 +63,16 @@ export const ollamaAdapter: ProviderAdapter = {
   },
 
   async search(ctx, req): Promise<AdapterOutcome<SearchHit[]>> {
+    // Officially documented: `max_results` defaults to 5, max 10 — mapping `maxResults`
+    // tightens the response so the caller pays for only the results it needs.
+    const maxResults = req.maxResults === undefined ? undefined : Math.min(10, Math.max(1, req.maxResults));
     const result = await request(ctx.fetchImpl, `${BASE_URL}/web_search`, {
       method: 'POST',
       headers: authHeaders(ctx),
-      json: { query: req.query },
+      json: {
+        query: req.query,
+        ...(maxResults === undefined ? {} : { max_results: maxResults }),
+      },
     });
     if (!result.ok) return result;
 
