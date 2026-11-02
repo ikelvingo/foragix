@@ -1,6 +1,7 @@
-# Dependencies and build output
+# Dependencies only. dist/ is deliberately COMMITTED: the skill copy must run the moment it is
+# installed (npx skills add); the build output is therefore treated as shipped source, not as
+# a disposable artifact. Regenerate with `npm run build`.
 node_modules/
-dist/
 
 # Design documents and process artifacts — not part of the published source.
 # The design docs live outside this repository; see README.md.

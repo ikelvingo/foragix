@@ -1,0 +1,188 @@
+/**
+ * Adapter-level tests for the baidu and zhipu adapters: request shape and response mapping
+ * against mocked fetch. The harness and pins stay provider-specific only.
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { baiduAdapter } from '../src/providers/baidu/index.js';
+import { zhipuCnAdapter } from '../src/providers/zhipu/index.js';
+const zhipuAdapter = zhipuCnAdapter;
+const CREDENTIALS = {
+    has: () => true,
+    get: (name) => `fake-value-for-${name}`,
+    fingerprint: () => 'fake-fingerprint',
+    describe: (names) => names.map((n) => ({ name: n, present: true })),
+};
+function lowercaseHeaders(input) {
+    const out = {};
+    for (const [key, value] of Object.entries(input))
+        out[key.toLowerCase()] = value;
+    return out;
+}
+function makeResponse(spec) {
+    const entries = Object.entries(lowercaseHeaders(spec.headers ?? {}));
+    const headerViews = {
+        forEach: (cb) => {
+            for (const [key, value] of entries)
+                cb(value, key);
+        },
+    };
+    const body = typeof spec.body === 'string' ? spec.body : JSON.stringify(spec.body);
+    return { status: spec.status, headers: headerViews, text: async () => body };
+}
+function makeContext(calls, responses, account = {}) {
+    let index = 0;
+    const fetchImpl = async (_url, init) => {
+        const spec = responses[index];
+        if (spec === undefined)
+            throw new Error(`no mock response for call #${index}`);
+        index += 1;
+        const reqHeaders = {};
+        new Map(Object.entries(init?.headers ?? {})).forEach((value, key) => {
+            reqHeaders[key.toLowerCase()] = String(value);
+        });
+        calls.push({
+            url: String(_url),
+            method: init?.method ?? 'GET',
+            headers: reqHeaders,
+            body: typeof init?.body === 'string' ? init.body : undefined,
+        });
+        return makeResponse(spec);
+    };
+    return {
+        credentials: CREDENTIALS,
+        config: { id: 'test', enabled: true, priority: 10, credentials: [], account, allowPaid: null },
+        fetchImpl,
+        now: () => 1_700_000_000_000,
+        credentialNames: [],
+    };
+}
+function runCapability(adapter, cap, ctx, 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+req) {
+    const method = cap === 'search' ? adapter.search : adapter.fetch;
+    assert.ok(method !== undefined, `adapter must implement ${cap}`);
+    return method.bind(adapter)(ctx, req);
+}
+// ---------------------------------------------------------------------------
+// Baidu
+// ---------------------------------------------------------------------------
+test('baidu search POSTs the verified messages body to the qianfan gateway', async () => {
+    const calls = [];
+    const ctx = makeContext(calls, [
+        { status: 200, body: { request_id: 'r1', references: [{ id: 1, url: 'https://b', title: 'T', content: 'C', date: '2026-10-29' }] } },
+    ]);
+    const outcome = await runCapability(baiduAdapter, 'search', ctx, { query: 'q', maxResults: 55 });
+    assert.equal(outcome.ok, true);
+    if (outcome.ok) {
+        assert.deepEqual(outcome.data, [{ title: 'T', url: 'https://b', snippet: 'C' }]);
+        assert.equal(outcome.usage, 1);
+    }
+    assert.equal(calls[0].url, 'https://qianfan.baidubce.com/v2/ai_search');
+    assert.equal(calls[0].headers.authorization, 'Bearer fake-value-for-BAIDU_API_KEY');
+    assert.deepEqual(JSON.parse(calls[0].body ?? '{}'), { messages: [{ role: 'user', content: 'q' }] });
+});
+test('baidu refuses loudly on an unrecognized 200 shape instead of failing silently', async () => {
+    const calls = [];
+    const ctx = makeContext(calls, [{ status: 200, body: { unknown_key: [] } }]);
+    const outcome = await runCapability(baiduAdapter, 'search', ctx, { query: 'q' });
+    assert.equal(outcome.ok, false);
+    if (!outcome.ok)
+        assert.equal(outcome.classification.kind, 'our_problem');
+});
+test('baidu envelope error carrying quota semantics is daily quota exhaustion', async () => {
+    const calls = [];
+    const ctx = makeContext(calls, [
+        { status: 200, body: { error_code: 5009, error_msg: 'daily free quota exhausted' } },
+    ]);
+    const outcome = await runCapability(baiduAdapter, 'search', ctx, { query: 'q' });
+    assert.equal(outcome.ok, false);
+    if (!outcome.ok) {
+        assert.equal(outcome.classification.kind, 'quota');
+        assert.equal(outcome.classification.period, 'day');
+    }
+});
+test('baidu envelope error without quota semantics stays our_problem, provider text redacted', async () => {
+    const secret = 'Bearer MastSecretToken123/abc';
+    const calls = [];
+    const ctx = makeContext(calls, [
+        { status: 200, body: { error_code: 17, error_msg: `internal error key=${secret}` } },
+    ]);
+    const outcome = await runCapability(baiduAdapter, 'search', ctx, { query: 'q' });
+    assert.equal(outcome.ok, false);
+    if (!outcome.ok) {
+        assert.equal(outcome.classification.kind, 'our_problem');
+        assert.match(outcome.classification.evidence, /^baidu error envelope code=17 \(/);
+        assert.ok(!outcome.classification.evidence.includes(secret), 'provider message must not pass through unredacted');
+    }
+});
+test('baidu daily free quota is 100 calls, Beijing-time reset, paid-gated', () => {
+    const init = baiduAdapter.init({});
+    assert.equal(init.canCharge, true);
+    assert.equal(init.quotaPeriod, 'day');
+    assert.equal(init.dayLimit, 100);
+    assert.equal(init.resetTimezone, 'Asia/Shanghai');
+    assert.deepEqual(baiduAdapter.capabilities, ['search']);
+});
+// ---------------------------------------------------------------------------
+// Zhipu
+// ---------------------------------------------------------------------------
+test('zhipu search truncates the query to 70 chars and pins the base engine', async () => {
+    const calls = [];
+    const ctx = makeContext(calls, [
+        { status: 200, body: { search_result: [{ title: 'T', content: 'C', link: 'https://z' }] } },
+    ]);
+    const outcome = await runCapability(zhipuAdapter, 'search', ctx, { query: 'x'.repeat(99), maxResults: 3 });
+    assert.equal(outcome.ok, true);
+    if (outcome.ok) {
+        assert.deepEqual(outcome.data, [{ title: 'T', url: 'https://z', snippet: 'C' }]);
+    }
+    assert.equal(calls[0].url, 'https://open.bigmodel.cn/api/paas/v4/web_search');
+    const body = JSON.parse(calls[0].body ?? '{}');
+    assert.equal(body.search_engine, 'search_std');
+    assert.equal(body.search_intent, false);
+    assert.equal(body.search_query.length, 70);
+    assert.equal(body.count, 3);
+});
+test('zhipu fetch maps the reader_result document', async () => {
+    const calls = [];
+    const ctx = makeContext(calls, [
+        { status: 200, body: { reader_result: { content: 'md text', title: 'TT', url: 'https://rr' } } },
+    ]);
+    const outcome = await runCapability(zhipuAdapter, 'fetch', ctx, { url: 'https://original' });
+    assert.equal(outcome.ok, true);
+    if (outcome.ok) {
+        const doc = outcome.data;
+        assert.deepEqual(doc, { url: 'https://rr', title: 'TT', content: 'md text' });
+    }
+    assert.equal(calls[0].url, 'https://open.bigmodel.cn/api/paas/v4/reader');
+    assert.deepEqual(JSON.parse(calls[0].body ?? '{}'), { url: 'https://original' });
+});
+test('zhipu verified error codes: auth and in-band quota cap', async () => {
+    assert.deepEqual(zhipuAdapter.errorHints?.authErrorCodes, ['1000', '1001', '1003', '1005']);
+    assert.deepEqual(zhipuAdapter.errorHints?.quotaErrorCodes, ['1308', '1113']);
+    const calls = [];
+    const ctx = makeContext(calls, [{ status: 401, body: { code: 1001, message: 'auth missing' } }]);
+    const outcome = await runCapability(zhipuAdapter, 'search', ctx, { query: 'q' });
+    assert.equal(outcome.ok, false);
+    if (!outcome.ok)
+        assert.equal(outcome.classification.kind, 'credential_rejected');
+});
+test('zhipu base_url account option switches the REST host (CN default; z.ai override supported)', async () => {
+    for (const [account, expectedHost] of [
+        [{}, 'https://open.bigmodel.cn'],
+        [{ base_url: 'https://api.z.ai/api/paas/v4' }, 'https://api.z.ai'],
+    ]) {
+        const calls = [];
+        const ctx = makeContext(calls, [{ status: 429, body: { error: { code: '1113', message: 'arrears' } } }], account);
+        await runCapability(zhipuAdapter, 'search', ctx, { query: 'q' });
+        assert.equal(new URL(calls[0].url).origin, expectedHost);
+    }
+});
+test('zhipu billing semantics: paid-gated, no locally resettable period', () => {
+    const init = zhipuAdapter.init({});
+    assert.equal(init.canCharge, true);
+    assert.equal(init.quotaPeriod, 'none');
+    assert.deepEqual(zhipuAdapter.capabilities, ['search', 'fetch']);
+});
+//# sourceMappingURL=providers-baidu-zhipu.test.js.map
