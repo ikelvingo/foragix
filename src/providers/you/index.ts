@@ -18,8 +18,9 @@
  *    clears only through an external event (credit top-up). `canCharge` is true: the paid
  *    gate applies by default.
  *  - A 429 whose body carries `spend_cap_exceeded` is a per-key spending cap that retrying
- *    cannot clear; the generic classifier records it as a short window, which the caller
- *    sees again on each attempt until the cap is raised — acceptable (verified gap).
+ *    cannot clear — it is classified as a durable quota state (period unknown), NOT a
+ *    short-window cooldown, so the engine stops hammering a capped key
+ *    (documents/providers/you.md → Errors; verified 2026-11-02).
  */
 import type { AdapterContext, AdapterOutcome, FetchDocument, ProviderAdapter, ProviderInit, SearchHit } from '../types.js';
 import { interpret, parseJson, request } from '../http.js';
@@ -95,7 +96,20 @@ export const youAdapter: ProviderAdapter = {
     if (!result.ok) return result;
 
     const verdict = interpret(result.data, this.errorHints, ctx.now());
-    if (verdict.kind !== 'success') return { ok: false, classification: verdict };
+    if (verdict.kind !== 'success') {
+      if (verdict.kind === 'rate_limited_short' && result.data.body.includes('spend_cap_exceeded')) {
+        // Verified: a per-key spending cap is not lifted by waiting — treat as durable quota.
+        return {
+          ok: false,
+          classification: {
+            kind: 'quota',
+            period: null,
+            evidence: 'you.com 429 spend_cap_exceeded — the spending cap is not lifted by retrying',
+          },
+        };
+      }
+      return { ok: false, classification: verdict };
+    }
 
     const parsed = parseJson<YouSearchResponse>(result.data.body);
     if (parsed === null) return { ok: false, classification: classifyParseFailure('you search body is not JSON') };
@@ -128,7 +142,19 @@ export const youAdapter: ProviderAdapter = {
     if (!result.ok) return result;
 
     const verdict = interpret(result.data, this.errorHints, ctx.now());
-    if (verdict.kind !== 'success') return { ok: false, classification: verdict };
+    if (verdict.kind !== 'success') {
+      if (verdict.kind === 'rate_limited_short' && result.data.body.includes('spend_cap_exceeded')) {
+        return {
+          ok: false,
+          classification: {
+            kind: 'quota',
+            period: null,
+            evidence: 'you.com 429 spend_cap_exceeded — the spending cap is not lifted by retrying',
+          },
+        };
+      }
+      return { ok: false, classification: verdict };
+    }
 
     const parsed = parseJson<YouContentItem[]>(result.data.body);
     if (parsed === null || !Array.isArray(parsed)) {

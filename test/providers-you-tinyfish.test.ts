@@ -188,6 +188,40 @@ test('tinyfish fetch maps the successful document', async () => {
   }
 });
 
+test('you 429 with spend_cap_exceeded is durable quota, not a retryable cooldown', async () => {
+  const calls: CapturedCall[] = [];
+  const ctx = makeContext(calls, [
+    { status: 429, body: { error: { code: 'spend_cap_exceeded', message: 'key cap reached' }, limit: 100, used: 100 } },
+  ]);
+  const outcome = await runCapability(youAdapter, 'search', ctx, { query: 'q' });
+  assert.equal(outcome.ok, false);
+  if (!outcome.ok) {
+    assert.equal(outcome.classification.kind, 'quota');
+    assert.equal(outcome.classification.period, null);
+  }
+});
+
+test('you 429 without spend caps stays a short-window rate limit', async () => {
+  const calls: CapturedCall[] = [];
+  const ctx = makeContext(calls, [{ status: 429, body: { detail: 'Too many requests' } }]);
+  const outcome = await runCapability(youAdapter, 'search', ctx, { query: 'q' });
+  if (!outcome.ok) assert.equal(outcome.classification.kind, 'rate_limited_short');
+});
+
+test('tinyfish fetch evidence passes provider error text through the redactor', async () => {
+  const leak = 'http://user:secret-hunter@blocked.example.com/x';
+  const calls: CapturedCall[] = [];
+  const ctx = makeContext(calls, [
+    { status: 200, body: { results: [], errors: [{ url: 'https://f', error: `upstream rejected ${leak}` }] } },
+  ]);
+  const outcome = await runCapability(tinyfishAdapter, 'fetch', ctx, { url: 'https://f' });
+  assert.equal(outcome.ok, false);
+  if (!outcome.ok) {
+    assert.equal(outcome.classification.kind, 'our_problem');
+    assert.ok(!outcome.classification.evidence.includes('secret-hunter'), 'provider-controlled text must be redacted');
+  }
+});
+
 test('tinyfish quota semantics: paid-gated daily allowances, not locally countable', () => {
   const init = tinyfishAdapter.init({});
   assert.equal(init.canCharge, true);

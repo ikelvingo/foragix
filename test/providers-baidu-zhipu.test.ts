@@ -118,6 +118,34 @@ test('baidu refuses loudly on an unrecognized 200 shape instead of failing silen
   if (!outcome.ok) assert.equal(outcome.classification.kind, 'our_problem');
 });
 
+test('baidu envelope error carrying quota semantics is daily quota exhaustion', async () => {
+  const calls: CapturedCall[] = [];
+  const ctx = makeContext(calls, [
+    { status: 200, body: { error_code: 5009, error_msg: 'daily free quota exhausted' } },
+  ]);
+  const outcome = await runCapability(baiduAdapter, 'search', ctx, { query: 'q' });
+  assert.equal(outcome.ok, false);
+  if (!outcome.ok) {
+    assert.equal(outcome.classification.kind, 'quota');
+    assert.equal(outcome.classification.period, 'day');
+  }
+});
+
+test('baidu envelope error without quota semantics stays our_problem, provider text redacted', async () => {
+  const secret = 'Bearer MastSecretToken123/abc';
+  const calls: CapturedCall[] = [];
+  const ctx = makeContext(calls, [
+    { status: 200, body: { error_code: 17, error_msg: `internal error key=${secret}` } },
+  ]);
+  const outcome = await runCapability(baiduAdapter, 'search', ctx, { query: 'q' });
+  assert.equal(outcome.ok, false);
+  if (!outcome.ok) {
+    assert.equal(outcome.classification.kind, 'our_problem');
+    assert.match(outcome.classification.evidence, /^baidu error envelope code=17 \(/);
+    assert.ok(!outcome.classification.evidence.includes(secret), 'provider message must not pass through unredacted');
+  }
+});
+
 test('baidu daily free quota is 100 calls, Beijing-time reset, paid-gated', () => {
   const init = baiduAdapter.init({});
   assert.equal(init.canCharge, true);

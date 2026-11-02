@@ -148,6 +148,18 @@ test('searxng self-hosted semantics: no charge, no countable quota', () => {
   assert.deepEqual(searxngAdapter.capabilities, ['search']);
 });
 
+test('searxng partial results with unresponsive engines are success-with-degradation', async () => {
+  // Pinned decision: only a zero-result response with all engines refused is degraded
+  // (see the adapter comment); usable partial results stay a success for the caller.
+  const calls: CapturedCall[] = [];
+  const ctx = makeContext(calls, [
+    { status: 200, body: { results: [{ url: 'https://ok', title: 'T' }], unresponsive_engines: [['google', 'denied']] } },
+  ]);
+  const outcome = await runCapability(searxngAdapter, 'search', ctx, { query: 'q' });
+  assert.equal(outcome.ok, true);
+  if (outcome.ok) assert.deepEqual(outcome.data, [{ title: 'T', url: 'https://ok' }]);
+});
+
 // ---------------------------------------------------------------------------
 // AnySearch
 // ---------------------------------------------------------------------------

@@ -18,11 +18,13 @@ const TOKEN_PATTERNS: readonly RegExp[] = [
 
 const REDACTED = '[redacted]';
 
-/** Strip the query and fragment of a URL — that is where a key most often lives. */
+/** Strip the userinfo, query, and fragment of a URL — that is where a key most often lives. */
 function stripUrlSecrets(text: string): string {
   return text.replace(/\b(https?:\/\/[^\s"'<>]+)/gi, (match) => {
     try {
       const url = new URL(match);
+      url.username = '';
+      url.password = '';
       url.search = '';
       url.hash = '';
       return url.toString();

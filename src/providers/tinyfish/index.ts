@@ -25,6 +25,7 @@
 import type { AdapterContext, AdapterOutcome, FetchDocument, ProviderAdapter, ProviderInit, SearchHit } from '../types.js';
 import { interpret, parseJson, request } from '../http.js';
 import { classifyParseFailure } from '../../errors/classify.js';
+import { redact } from '../../errors/redact.js';
 
 const CREDENTIAL = 'TINYFISH_API_KEY';
 const SEARCH_URL = 'https://api.search.tinyfish.ai';
@@ -126,8 +127,10 @@ export const tinyfishAdapter: ProviderAdapter = {
       return {
         ok: false,
         classification: {
+          // `error` is provider-controlled text: it goes through the same redactor as the
+          // generic classifier before it may enter any evidence string.
           kind: 'our_problem',
-          evidence: `tinyfish fetch reported no usable content${failure === undefined ? '' : ` (${failure.error})`}`,
+          evidence: `tinyfish fetch reported no usable content${failure === undefined ? '' : ` (${redact(String(failure.error ?? 'unknown'), 80)})`}`,
         },
       };
     }

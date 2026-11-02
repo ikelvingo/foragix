@@ -14,12 +14,14 @@
  *    instead of silently reporting an empty success.
  *  - Quota: 100 free calls/day, then usage-based billing — `canCharge` true, the paid gate
  *    applies by default. Daily reset assumed at Beijing time (documented gap).
- *  - Qianfan v2 failures carry `{error_code, error_msg}`; an in-envelope error on a 2xx
- *    response is surfaced as "our problem" since no per-code semantics are published.
+ *  - Qianfan v2 failures carry `{error_code, error_msg}` on 2xx responses; when the envelope
+ *    text carries quota semantics (the documented daily-exhaustion path) it is a day-period
+ *    quota event, and anything else stays unverified (provider text is redacted).
  */
 import type { AdapterContext, AdapterOutcome, ProviderAdapter, ProviderInit, SearchHit } from '../types.js';
 import { interpret, parseJson, request } from '../http.js';
-import { classifyParseFailure } from '../../errors/classify.js';
+import { bodySuggestsQuota, classifyParseFailure } from '../../errors/classify.js';
+import { redact } from '../../errors/redact.js';
 
 const CREDENTIAL = 'BAIDU_API_KEY';
 const ENDPOINT_SEARCH = 'https://qianfan.baidubce.com/v2/ai_search';
@@ -89,11 +91,24 @@ export const baiduAdapter: ProviderAdapter = {
     const parsed = parseJson<BaiduSearchResponse>(result.data.body);
     if (parsed === null) return { ok: false, classification: classifyParseFailure('baidu search body is not JSON') };
     if (typeof parsed.error_code === 'number' && parsed.error_code !== 0) {
+      // The official doc: the daily free-quota exhaustion of this product surfaces through
+      // this envelope (a quota/limit error, not HTTP 402). Quota-semantics text therefore
+      // means a day-period quota event; provider text stays redacted in every branch.
+      if (bodySuggestsQuota(result.data.body)) {
+        return {
+          ok: false,
+          classification: {
+            kind: 'quota',
+            period: 'day',
+            evidence: `baidu error envelope code=${parsed.error_code} with quota semantics`,
+          },
+        };
+      }
       return {
         ok: false,
         classification: {
           kind: 'our_problem',
-          evidence: `baidu error envelope code=${parsed.error_code} (${parsed.error_msg ?? 'no message'}) on a 2xx response`,
+          evidence: `baidu error envelope code=${parsed.error_code} (${redact(parsed.error_msg ?? 'no message', 80)})`,
         },
       };
     }
