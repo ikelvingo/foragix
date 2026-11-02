@@ -12,6 +12,8 @@ import { braveAdapter } from './brave/index.js';
 import { minimaxAdapter } from './minimax/index.js';
 import { firecrawlAdapter } from './firecrawl/index.js';
 import { deepseekAdapter } from './deepseek/index.js';
+import { anysearchAdapter } from './anysearch/index.js';
+import { searxngAdapter } from './searxng/index.js';
 
 export const ADAPTERS: readonly ProviderAdapter[] = [
   tavilyAdapter,
@@ -20,6 +22,8 @@ export const ADAPTERS: readonly ProviderAdapter[] = [
   minimaxAdapter,
   firecrawlAdapter,
   deepseekAdapter,
+  anysearchAdapter,
+  searxngAdapter,
 ];
 
 /**
@@ -30,8 +34,6 @@ export const ADAPTERS: readonly ProviderAdapter[] = [
  * "must be decided" are open questions, not verified facts; re-check before implementing.
  */
 export const NOT_IMPLEMENTED: ReadonlyArray<{ id: string; reason: string }> = [
-  { id: 'anysearch', reason: 'in fact-checking both the endpoint and the credential description are "unconfirmed"; must not be implemented on a guess' },
-  { id: 'searxng', reason: 'self-hosted software with no platform-wide quota; the source of the instance address must be decided first' },
   { id: 'you', reason: 'the free path is MCP rather than a standalone REST, which conflicts with "MCP-only does not count as supported"' },
   { id: 'tinyfish', reason: 'Search and Fetch have different limits, and the short period is not modeled; quota attribution must be decided first' },
   { id: 'baidu', reason: 'metered billing after the free quota, so the default stance of the paid gate must be decided first' },
