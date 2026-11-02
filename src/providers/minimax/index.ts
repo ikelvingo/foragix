@@ -91,6 +91,25 @@ export const minimaxAdapter: ProviderAdapter = {
     return 1;
   },
 
+  /**
+   * Lane A: after a quota refusal the engine may probe this read endpoint once per window.
+   * Returns the vendor-declared boundary (`general` row's `end_time`) when that value lies in
+   * the future; anything unusable degrades to null (QUOTA_UNKNOWN instead of a guess).
+   */
+  async probeReset(ctx: AdapterContext): Promise<number | null> {
+    const result = await request(ctx.fetchImpl, `${baseUrl(ctx)}/v1/token_plan/remains`, {
+      method: 'GET',
+      headers: authHeaders(ctx),
+    });
+    if (!result.ok) return null;
+    const parsed = parseJson<{ model_remains?: Array<{ model_name?: string; end_time?: number }> }>(result.data.body);
+    if (parsed === null) return null;
+    const general = (parsed.model_remains ?? []).find((r) => r?.model_name === 'general');
+    const endTime = typeof general?.end_time === 'number' ? general.end_time : Number(general?.end_time);
+    if (!Number.isFinite(endTime) || endTime <= ctx.now()) return null;
+    return endTime;
+  },
+
   async search(ctx, req): Promise<AdapterOutcome<SearchHit[]>> {
     const result = await request(ctx.fetchImpl, `${baseUrl(ctx)}/v1/coding_plan/search`, {
       method: 'POST',

@@ -306,9 +306,31 @@ export class Engine {
    * The change log and the diagnostic callback record structural labels only — never
    * `Classification.evidence`, which is adapter-supplied free text.
    */
-  private applyFailure(providerId: string, classification: Classification, quotaPeriod: string): void {
+  private async applyFailure(
+    providerId: string,
+    classification: Classification,
+    quotaPeriod: string,
+    provider: ProviderConfig,
+    adapter: ProviderAdapter,
+  ): Promise<void> {
     const now = this.deps.now();
     const label = structuralLabel(classification);
+
+    // Lane A (provider-declared reset): the boundary is persisted only for quota refusals whose
+    // window length the engine cannot derive (period === null). The declared value from the
+    // refusal body wins; otherwise a declaring adapter may be probed — at most once per window,
+    // because the stored boundary pre-empts further probes. The probe is a NETWORK call and
+    // must run before the transaction (no write tx is ever held across a network request).
+    if (classification.kind === 'quota' && classification.period === null) {
+      const stored = this.deps.db.readVendorReset(providerId);
+      const declared = classification.resetAt;
+      if (stored === null && declared === undefined && adapter.probeReset !== undefined) {
+        const probed = await adapter.probeReset(this.contextFor(provider, adapter));
+        if (probed !== null && probed > now) this.deps.db.writeVendorReset(providerId, probed);
+      } else if (stored === null && declared !== undefined) {
+        if (declared > now) this.deps.db.writeVendorReset(providerId, declared);
+      }
+    }
 
     this.deps.db.transaction(() => {
       switch (classification.kind) {
@@ -464,12 +486,45 @@ export class Engine {
       }
 
       // A provider requiring explicit migration does not take part in automatic quota protection
-      if (row?.needs_migration === 1) {
+      if (row === null || row?.needs_migration === 1) {
         attempted.push({
           providerId: candidate.providerId,
           classification: { kind: 'our_problem', evidence: 'needs explicit migration (unit/pool/period changed)' },
         });
         continue;
+      }
+
+      // Local budget (schema.localCap providers only, e.g. brave): usage reaching the locally
+      // declared ceiling is refused before the request — the approximate brake the owner
+      // elected for providers whose free tier sits on a saved payment card. Locally counted,
+      // never a vendor probe; the period machinery recovers it at the boundary.
+      if (adapter.schema.localCap === true && provider.account['capped_free'] !== false) {
+        const initNow = adapter.init(provider.account);
+        const dayHit = initNow.dayLimit !== null && row.day_used >= initNow.dayLimit;
+        const monthHit = initNow.monthLimit !== null && row.month_used >= initNow.monthLimit;
+        if (dayHit || monthHit) {
+          const classification: Classification = {
+            kind: 'quota',
+            period: monthHit ? 'month' : 'day',
+            evidence: 'locally declared budget ceiling reached (capped_free)',
+          };
+          const attemptedEntry = { providerId: candidate.providerId, classification };
+          try {
+            await this.applyFailure(candidate.providerId, classification, initNow.quotaPeriod, provider, adapter);
+          } catch (err) {
+            // State could not be persisted: fail closed, same as the failure path.
+            this.deps.onDiagnostic?.('state_write_failed', {
+              providerId: candidate.providerId,
+              error: describeError(err),
+            });
+            return this.storageFailure(
+              capability,
+              `failed to write budget-refusal state, handled as fail-closed: ${describeError(err)}`,
+            );
+          }
+          attempted.push(attemptedEntry);
+          continue; // budget-braked providers are not attempted this round
+        }
       }
 
       const outcome = await this.callSafely(candidate.providerId, provider, adapter, capability, call);
@@ -491,7 +546,7 @@ export class Engine {
       }
 
       try {
-        this.applyFailure(candidate.providerId, outcome.classification, adapter.init(provider.account).quotaPeriod);
+        await this.applyFailure(candidate.providerId, outcome.classification, adapter.init(provider.account).quotaPeriod, provider, adapter);
       } catch (err) {
         // Failure state could not be persisted either: fail closed, same as the success path.
         this.deps.onDiagnostic?.('state_write_failed', {

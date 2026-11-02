@@ -12,8 +12,9 @@ export const BACKOFF_BASE_MS = 1_000;
 export type Classification =
   /** Success; a legitimately empty result also counts as success. */
   | { readonly kind: 'success' }
-  /** Quota/balance exhausted. `period === null` means it cannot be determined whether the cycle is daily or monthly. */
-  | { readonly kind: 'quota'; readonly period: 'day' | 'month' | null; readonly evidence: string }
+  /** Quota/balance exhausted. `period === null` means it cannot be determined whether the cycle is daily or monthly.
+   *  `resetAt` (optional) carries a vendor-DECLARED reset boundary read out of the refusal itself — lane A. */
+  | { readonly kind: 'quota'; readonly period: 'day' | 'month' | null; readonly evidence: string; readonly resetAt?: number }
   /** Credential rejected (401, or the authentication semantics of a 403). */
   | { readonly kind: 'credential_rejected'; readonly evidence: string }
   /** Transient failure (network / timeout / 5xx / parse failure). */

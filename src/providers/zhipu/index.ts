@@ -41,6 +41,21 @@ function authHeaders(ctx: AdapterContext): Record<string, string> {
   return { authorization: `Bearer ${key}` };
 }
 
+
+/**
+ * Lane A in-band: the verified `1308` refusal carries the vendor's own reset time inside its
+ * message ("您的限额将在 <time> 重置", Beijing time). Extracting it here means every refusal
+ * records the recovery boundary with zero extra requests.
+ */
+function declaredResetAt(body: string | undefined): number | undefined {
+  if (body === undefined) return undefined;
+  const match = /(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(body);
+  if (match === null) return undefined;
+  const iso = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}+08:00`;
+  const at = Date.parse(iso);
+  return Number.isFinite(at) ? at : undefined;
+}
+
 export const zhipuAdapter: ProviderAdapter = {
   id: 'zhipu',
   capabilities: ['search', 'fetch'],
@@ -99,7 +114,13 @@ export const zhipuAdapter: ProviderAdapter = {
     if (!result.ok) return result;
 
     const verdict = interpret(result.data, this.errorHints, ctx.now());
-    if (verdict.kind !== 'success') return { ok: false, classification: verdict };
+    if (verdict.kind !== 'success') {
+      if (verdict.kind === 'quota' && verdict.period === null) {
+        const resetAt = declaredResetAt(result.data.body);
+        if (resetAt !== undefined) return { ok: false, classification: { ...verdict, resetAt } };
+      }
+      return { ok: false, classification: verdict };
+    }
 
     const parsed = parseJson<ZhipuSearchResponse>(result.data.body);
     if (parsed === null) return { ok: false, classification: classifyParseFailure('zhipu search body is not JSON') };
@@ -124,7 +145,13 @@ export const zhipuAdapter: ProviderAdapter = {
     if (!result.ok) return result;
 
     const verdict = interpret(result.data, this.errorHints, ctx.now());
-    if (verdict.kind !== 'success') return { ok: false, classification: verdict };
+    if (verdict.kind !== 'success') {
+      if (verdict.kind === 'quota' && verdict.period === null) {
+        const resetAt = declaredResetAt(result.data.body);
+        if (resetAt !== undefined) return { ok: false, classification: { ...verdict, resetAt } };
+      }
+      return { ok: false, classification: verdict };
+    }
 
     const parsed = parseJson<ZhipuReaderResponse>(result.data.body);
     if (parsed === null) return { ok: false, classification: classifyParseFailure('zhipu reader body is not JSON') };

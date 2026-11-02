@@ -96,6 +96,13 @@ export interface ProviderAdapter {
    */
   init(account: Readonly<Record<string, unknown>>): ProviderInit;
 
+  /**
+   * Lane A (provider-declared reset): queried ONLY after a quota-class refusal, at most once
+   * per vendor window. Returns the vendor-declared reset boundary (unix ms, must lie in the
+   * future) or null when nothing trustworthy is available — the engine then degrades to the
+   * QUOTA_UNKNOWN semantics instead of guessing.
+   */
+  probeReset?(ctx: AdapterContext): Promise<number | null>;
   search?(ctx: AdapterContext, req: SearchRequest): Promise<AdapterOutcome<SearchHit[]>>;
   fetch?(ctx: AdapterContext, req: FetchRequest): Promise<AdapterOutcome<FetchDocument>>;
 

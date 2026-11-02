@@ -111,6 +111,17 @@ export function applyResets(adapter: SqliteAdapter, providerId: string, ctx: Res
     }
   }
 
+  // 5.5) Provider-declared reset (lane A): QUOTA_UNKNOWN with a vendor-stated boundary clears
+  //      when that boundary is passed — the vendor is the authority on when its window rolls.
+  if ((row.is_available & BIT.QUOTA_UNKNOWN) !== 0) {
+    const vendorReset = adapter.readVendorReset(providerId);
+    if (vendorReset !== null && vendorReset <= ctx.now) {
+      adapter.clearBits(providerId, BIT.QUOTA_UNKNOWN);
+      adapter.writeVendorReset(providerId, null);
+      adapter.log({ providerId, at: ctx.now, kind: 'bit_clear', detail: `vendor-declared reset (${vendorReset}) reached` });
+    }
+  }
+
   const after = adapter.getProvider(providerId);
   if (after === null) throw new Error(`provider_state row missing after resets: ${providerId}`);
   return {

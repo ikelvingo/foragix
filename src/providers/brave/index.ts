@@ -55,7 +55,15 @@ export const braveAdapter: ProviderAdapter = {
     id: 'brave',
     requiresCredentials: true,
     credentialNames: [CREDENTIAL],
-    accountOptions: {},
+    // 本地预算：免费额度建立在绑卡上，超出即真实扣卡——这是全名册唯一有此结构的供应商
+    localCap: true,
+    accountOptions: {
+      capped_free: {
+        type: 'boolean',
+        default: true,
+        description: 'Limit brave to its counted monthly free allowance; false removes the local brake',
+      },
+    },
   },
 
   init(_account): ProviderInit {

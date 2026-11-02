@@ -135,6 +135,23 @@ export class SqliteAdapter {
     return (row as unknown as ProviderRow | undefined) ?? null;
   }
 
+  /** Provider-declared quota-reset timestamp (lane A): persisted beside the schema metadata,
+   *  deliberately NOT a provider_state column — additive state must not disturb the DDL triple-gate. */
+  readVendorReset(providerId: string): number | null {
+    const raw = this.readMeta(`vendor_reset:${providerId}`);
+    if (raw === null) return null;
+    const value = Number.parseInt(raw, 10);
+    return Number.isInteger(value) && value > 0 ? value : null;
+  }
+
+  writeVendorReset(providerId: string, resetAt: number | null): void {
+    if (resetAt === null) {
+      this.db.prepare('DELETE FROM schema_meta WHERE key = ?').run(`vendor_reset:${providerId}`);
+      return;
+    }
+    this.writeMeta(`vendor_reset:${providerId}`, String(resetAt));
+  }
+
   listProviders(): ProviderRow[] {
     return this.db.prepare('SELECT * FROM provider_state ORDER BY provider_id').all() as unknown as ProviderRow[];
   }

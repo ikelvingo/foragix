@@ -58,12 +58,13 @@ interface Harness {
   close(): void;
 }
 
-function makeEngine(options: {
+export function makeEngine(options: {
   yaml?: string;
   routes?: Record<string, Canned>;
   env?: NodeJS.ProcessEnv;
   adapters?: readonly ProviderAdapter[];
   now?: () => number;
+  fetchImpl?: typeof globalThis.fetch;
 } = {}): Harness {
   const adapters = options.adapters ?? ADAPTERS;
   const config = mergeDefaultProviders(parseConfig(options.yaml ?? CONFIG_YAML, { lookup: createSchemaLookup(adapters) }), adapters);
@@ -78,7 +79,7 @@ function makeEngine(options: {
     config,
     credentials,
     adapters: new Map(adapters.map((a) => [a.id, a])),
-    fetchImpl: fakeFetch(options.routes ?? {}),
+    fetchImpl: options.fetchImpl ?? fakeFetch(options.routes ?? {}),
     ...(options.now === undefined ? {} : { now: options.now }),
   });
   engine.bootstrap();
