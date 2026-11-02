@@ -34,7 +34,7 @@ export interface ResetOutcome {
  *
  * Clearing rules: day/month boundary → QUOTA_DAY / QUOTA_MONTH (day and month are independent and
  * the first init never counts as a boundary); `retry_after` reached → TRANSIENT | RATE_LIMITED_SHORT;
- * credentials present → CREDENTIAL_MISSING; `allow_paid` → PAID_NOT_ALLOWED; credential fingerprint
+ * credentials present → CREDENTIAL_MISSING; legacy PAID bits are cleared at refresh; credential fingerprint
  * changed → CREDENTIAL_REJECTED (presence alone is not enough, and a change only permits a retry).
  */
 export function applyResets(adapter: SqliteAdapter, providerId: string, ctx: ResetContext): ResetOutcome {
@@ -106,10 +106,11 @@ export function applyResets(adapter: SqliteAdapter, providerId: string, ctx: Res
     }
   }
 
-  // 6) User accepts paid usage → clear "paid usage not accepted"
-  if (ctx.allowPaid && (row.is_available & BIT.PAID_NOT_ALLOWED) !== 0) {
+  // 6) The paid-gate concept is retired: the old bit from state written by previous versions
+  //    is removed unconditionally at refresh time (there is no gate left to re-set it).
+  if ((row.is_available & BIT.PAID_NOT_ALLOWED) !== 0) {
     adapter.clearBits(providerId, BIT.PAID_NOT_ALLOWED);
-    adapter.log({ providerId, at: ctx.now, kind: 'bit_clear', detail: 'allow_paid enabled' });
+    adapter.log({ providerId, at: ctx.now, kind: 'bit_clear', detail: 'paid gate retired' });
   }
 
   const after = adapter.getProvider(providerId);

@@ -194,7 +194,7 @@ test('a period boundary does not clear the credential bits or the paid-gate bit'
   const mask = db.getProvider('p1')?.is_available ?? 0;
   assert.equal(mask & BIT.QUOTA_DAY, 0, 'the quota bit should be cleared by the period boundary');
   assert.notEqual(mask & BIT.CREDENTIAL_MISSING, 0, 'the credential bit must not be cleared by the period boundary');
-  assert.notEqual(mask & BIT.PAID_NOT_ALLOWED, 0, 'the paid-gate bit must not be cleared by the period boundary');
+  assert.equal(mask & BIT.PAID_NOT_ALLOWED, 0, 'the retired paid bit is removed at refresh');
   db.close();
 });
 
