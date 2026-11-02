@@ -23,7 +23,7 @@ import { interpret, parseJson, request } from '../http.js';
 import { classifyParseFailure } from '../../errors/classify.js';
 
 const CREDENTIAL = 'ZHIPU_API_KEY';
-const BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
+const DEFAULT_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
 const MAX_COUNT = 50;
 const MAX_QUERY_CHARS = 70;
 
@@ -56,6 +56,13 @@ function declaredResetAt(body: string | undefined): number | undefined {
   return Number.isFinite(at) ? at : undefined;
 }
 
+
+function baseUrl(ctx: AdapterContext): string {
+  const raw = ctx.config.account['base_url'];
+  if (typeof raw === 'string' && raw !== '') return raw.replace(/\/+$/, '');
+  return DEFAULT_BASE_URL;
+}
+
 export const zhipuAdapter: ProviderAdapter = {
   id: 'zhipu',
   capabilities: ['search', 'fetch'],
@@ -68,7 +75,15 @@ export const zhipuAdapter: ProviderAdapter = {
     // installs must not call it until the owner enables it in the config.
     defaultEnabled: false,
     credentialNames: [CREDENTIAL],
-    accountOptions: {},
+    // Region switch: CN by default (open.bigmodel.cn carries the standalone REST tool
+    // endpoint); overseas z.ai accounts override via this config field. Same body/auth/shape.
+    accountOptions: {
+      base_url: {
+        type: 'string',
+        default: DEFAULT_BASE_URL,
+        description: 'Zhipu REST host; overseas z.ai accounts may use https://api.z.ai/api/paas/v4',
+      },
+    },
   },
 
   errorHints: {
@@ -100,7 +115,7 @@ export const zhipuAdapter: ProviderAdapter = {
 
   async search(ctx, req): Promise<AdapterOutcome<SearchHit[]>> {
     const count = req.maxResults === undefined ? undefined : Math.min(MAX_COUNT, Math.max(1, req.maxResults));
-    const result = await request(ctx.fetchImpl, `${BASE_URL}/web_search`, {
+    const result = await request(ctx.fetchImpl, `${baseUrl(ctx)}/web_search`, {
       method: 'POST',
       headers: authHeaders(ctx),
       json: {
@@ -137,7 +152,7 @@ export const zhipuAdapter: ProviderAdapter = {
   },
 
   async fetch(ctx, req): Promise<AdapterOutcome<FetchDocument>> {
-    const result = await request(ctx.fetchImpl, `${BASE_URL}/reader`, {
+    const result = await request(ctx.fetchImpl, `${baseUrl(ctx)}/reader`, {
       method: 'POST',
       headers: authHeaders(ctx),
       json: { url: req.url },

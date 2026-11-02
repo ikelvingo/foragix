@@ -202,6 +202,18 @@ test('zhipu verified error codes: auth and in-band quota cap', async () => {
   if (!outcome.ok) assert.equal(outcome.classification.kind, 'credential_rejected');
 });
 
+test('zhipu base_url account option switches the REST host (CN default; z.ai override supported)', async () => {
+  for (const [account, expectedHost] of [
+    [{}, 'https://open.bigmodel.cn'],
+    [{ base_url: 'https://api.z.ai/api/paas/v4' }, 'https://api.z.ai'],
+  ] as const) {
+    const calls: CapturedCall[] = [];
+    const ctx = makeContext(calls, [{ status: 429, body: { error: { code: '1113', message: 'arrears' } } }], account);
+    await runCapability(zhipuAdapter, 'search', ctx, { query: 'q' });
+    assert.equal(new URL(calls[0]!.url).origin, expectedHost);
+  }
+});
+
 test('zhipu billing semantics: paid-gated, no locally resettable period', () => {
   const init = zhipuAdapter.init({});
   assert.equal(init.canCharge, true);
