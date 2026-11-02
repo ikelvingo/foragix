@@ -200,16 +200,39 @@ export class Engine {
   // Gates and resets
   // ---------------------------------------------------------------------------
 
-  /** Sync the credential gate and the paid gate. Must run before routing. */
+  /** Sync the credential gate. Must run before routing. */
   private syncGates(provider: ProviderConfig, adapter: ProviderAdapter): void {
     const now = this.deps.now();
     const required = provider.credentials.filter((c) => c.required).map((c) => c.name);
     const credentialsPresent = required.every((name) => this.deps.credentials.has(name));
-    const allowPaid = effectiveAllowPaid(this.deps.config, provider);
-    const init = adapter.init(provider.account);
 
     syncCredentialGate(this.deps.db, provider.id, { now, credentialsPresent });
-    syncPaidGate(this.deps.db, provider.id, { now, canCharge: init.canCharge, allowPaid });
+  }
+
+  /**
+   * The paid-gate verdict for the **next call**: free/prepaid-included usage is never
+   * intercepted; only a pay-as-you-go call with no countable free allowance left is.
+   */
+  private paidGateContext(
+    provider: ProviderConfig,
+    adapter: ProviderAdapter,
+    now: number,
+  ): Parameters<typeof syncPaidGate>[2] {
+    const allowPaid = effectiveAllowPaid(this.deps.config, provider);
+    const init = adapter.init(provider.account);
+    const billingKind = init.billingKind ?? 'payg';
+
+    let freeAllowanceAvailable = false;
+    if (init.dayLimit !== null || init.monthLimit !== null) {
+      const row = this.deps.db.getProvider(provider.id);
+      // Post-reset counters: a fresh period starts the allowance over automatically.
+      freeAllowanceAvailable =
+        row !== null &&
+        ((init.dayLimit !== null && row.day_used < init.dayLimit) ||
+          (init.monthLimit !== null && row.month_used < init.monthLimit));
+    }
+
+    return { now, canCharge: init.canCharge, billingKind, freeAllowanceAvailable, allowPaid };
   }
 
   /** Perform a lazy reset for a single provider (period boundary, cooldown expiry, credential change, paid gate). */
@@ -235,6 +258,9 @@ export class Engine {
     }
 
     applyResets(this.deps.db, provider.id, { now, credentialsPresent, credentialFingerprint: fingerprint, allowPaid });
+    // The paid gate depends on the post-reset counters, so it runs after `applyResets`: a
+    // period boundary that refills the allowance lifts the gate on the same refresh.
+    syncPaidGate(this.deps.db, provider.id, this.paidGateContext(provider, adapter, now));
   }
 
   /** Reset every provider. A provider failing only affects itself — it is recorded in the returned set. */

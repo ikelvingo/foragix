@@ -124,6 +124,14 @@ export interface PaidGateContext {
   now: number;
   /** Declared by the adapter: whether this provider may incur actual charges. */
   canCharge: boolean;
+  /** Declared by the adapter: the billing shape of this provider's calls (default `'payg'`). */
+  billingKind: 'included' | 'payg';
+  /**
+   * Whether the **next call is covered by free/pre-purchased usage** rather than a
+   * cash-flow event. `true` = free allowance available (local counters below any declared
+   * ceiling); `null` = no locally countable ceiling exists, so every call is billable.
+   */
+  freeAllowanceAvailable: boolean;
   /** Effective allow_paid. */
   allowPaid: boolean;
 }
@@ -131,15 +139,20 @@ export interface PaidGateContext {
 /**
  * Synchronize the paid gate bit.
  *
- * A provider that may incur charges gets the bit set while the user has not accepted paid usage — **it must not be called even when credentials are present**.
- * Purely free services (can_charge = false) are unaffected by the gate.
+ * **The gate controls billable usage, not availability**: free resources and consumption of
+ * a pre-purchased pool are never intercepted. The bit is set only when, for a pay-as-you-go
+ * provider, the **next call would be a charged call** — no countable free allowance is left
+ * (`freeAllowanceAvailable: false`), the provider has none (`canCharge` with an empty
+ * allowance) — while the user has not accepted paid usage. Usage accepted via
+ * `allow_paid: true` disables the bit for the whole provider.
  */
 export function syncPaidGate(adapter: SqliteAdapter, providerId: string, ctx: PaidGateContext): void {
   adapter.ensureProvider(providerId);
   const row = adapter.getProvider(providerId);
   if (row === null) return;
 
-  const shouldBlock = ctx.canCharge && !ctx.allowPaid;
+  const shouldBlock =
+    ctx.canCharge && !ctx.allowPaid && ctx.billingKind !== 'included' && !ctx.freeAllowanceAvailable;
   const blocked = (row.is_available & BIT.PAID_NOT_ALLOWED) !== 0;
 
   if (shouldBlock && !blocked) {

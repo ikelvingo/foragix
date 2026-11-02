@@ -187,7 +187,7 @@ test('paid gate: may incur charges and paid usage not accepted → bit set, and 
   const db = openDb(clock);
   applyResets(db, 'p1', ctx(clock));
 
-  syncPaidGate(db, 'p1', { now: clock.now, canCharge: true, allowPaid: false });
+  syncPaidGate(db, 'p1', { now: clock.now, canCharge: true, billingKind: 'payg', freeAllowanceAvailable: false, allowPaid: false });
   assert.deepEqual(decodeReasons(db.getProvider('p1')?.is_available ?? 0), ['paid_not_allowed']);
 
   applyResets(db, 'p1', ctx(clock, { credentialsPresent: true, credentialFingerprint: 'fp-1' }));
@@ -199,7 +199,7 @@ test('paid gate: lifted once the user accepts paid usage', () => {
   const clock = { now: Date.UTC(2026, 9, 29, 12) };
   const db = openDb(clock);
   applyResets(db, 'p1', ctx(clock));
-  syncPaidGate(db, 'p1', { now: clock.now, canCharge: true, allowPaid: false });
+  syncPaidGate(db, 'p1', { now: clock.now, canCharge: true, billingKind: 'payg', freeAllowanceAvailable: false, allowPaid: false });
 
   applyResets(db, 'p1', ctx(clock, { allowPaid: true }));
   assert.equal(db.getProvider('p1')?.is_available, 0, 'after accepting paid usage it should become usable again');
@@ -210,8 +210,26 @@ test('purely free services are unaffected by the paid gate', () => {
   const clock = { now: Date.UTC(2026, 9, 29, 12) };
   const db = openDb(clock);
   applyResets(db, 'p1', ctx(clock));
-  syncPaidGate(db, 'p1', { now: clock.now, canCharge: false, allowPaid: false });
+  syncPaidGate(db, 'p1', { now: clock.now, canCharge: false, billingKind: 'payg', freeAllowanceAvailable: false, allowPaid: false });
   assert.equal(db.getProvider('p1')?.is_available, 0, 'can_charge=false should not be gated');
+  db.close();
+});
+
+test('payg provider: free-allowance usage is never gated, only the charged call is', () => {
+  const clock = { now: Date.UTC(2026, 9, 29, 12) };
+  const db = openDb(clock);
+  applyResets(db, 'p1', ctx(clock));
+  syncPaidGate(db, 'p1', { now: clock.now, canCharge: true, billingKind: 'payg', freeAllowanceAvailable: true, allowPaid: false });
+  assert.equal(db.getProvider('p1')?.is_available, 0, 'usage inside the free allowance must pass the gate');
+  db.close();
+});
+
+test('included provider: consumption of a prepaid pool is never gated', () => {
+  const clock = { now: Date.UTC(2026, 9, 29, 12) };
+  const db = openDb(clock);
+  applyResets(db, 'p1', ctx(clock));
+  syncPaidGate(db, 'p1', { now: clock.now, canCharge: true, billingKind: 'included', freeAllowanceAvailable: false, allowPaid: false });
+  assert.equal(db.getProvider('p1')?.is_available, 0, 'spending pre-purchased pool credits is no cash-flow event');
   db.close();
 });
 

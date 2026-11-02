@@ -50,6 +50,9 @@ export const metasoAdapter: ProviderAdapter = {
     return {
       version: 1,
       canCharge: true,
+      // Consumption of a pre-purchased pool: spending it is no cash-flow event, so the
+      // usage-based paid gate does not apply to these calls ("included" billing shape).
+      billingKind: 'included',
       // Prepaid credits with no documented per-call price or reset window: exhaustion is
       // durable until an external event (top-up), same stance as the minimax plan pool.
       quotaPeriod: 'none',

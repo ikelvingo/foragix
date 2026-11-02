@@ -61,6 +61,9 @@ export const linkupAdapter: ProviderAdapter = {
     return {
       version: 1,
       canCharge: true,
+      // Consumption of a pre-purchased pool: spending it is no cash-flow event, so the
+      // usage-based paid gate does not apply to these calls ("included" billing shape).
+      billingKind: 'included',
       quotaPeriod: 'none',
       dayLimit: null,
       monthLimit: null,

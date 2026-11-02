@@ -22,6 +22,18 @@ export interface ProviderInit {
   /** Whether this provider can incur actual charges; determines whether the paid gate applies. */
   readonly canCharge: boolean;
   /**
+   * **Billing shape of this provider's calls** — declared only when `canCharge` is true;
+   * defaults to `'payg'`.
+   *
+   * - `'payg'` — calls beyond the declared free allowance (dayLimit/monthLimit) turn into
+   *   real charges. The gate intercepts exactly those calls; usage inside the allowance
+   *   passes through like any free resource.
+   * - `'included'` — every call consumes a **pre-purchased** pool (subscription points,
+   *   prepaid credits): spending the pool creates no new cash-flow event, so the gate must
+   *   not apply. When the pool runs dry the regular quota-exhaustion path returns `quota`.
+   */
+  readonly billingKind?: 'included' | 'payg';
+  /**
    * **By what period** this provider's quota resets — independent of `dayLimit` / `monthLimit`.
    * The limits answer "can it be counted locally"; `quotaPeriod` answers "when does the quota recover".
    *
