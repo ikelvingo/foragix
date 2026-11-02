@@ -35,6 +35,12 @@ export type ChangeKind =
   | 'static_reseed'
   | 'bit_set'
   | 'bit_clear'
+  /** Quota exhaustion recorded as an exhausted-period key (audit §2.5) — no bit involved. */
+  | 'exhausted'
+  /** Cooldown recorded as `retry_after` (audit §2.1) — no bit involved. */
+  | 'cooldown_set'
+  /** Cooling end reached; the timestamp lane nulls out. */
+  | 'cooldown_clear'
   | 'period_reset'
   | 'migration'
   | 'enable_sync'
@@ -152,6 +158,22 @@ export class SqliteAdapter {
     this.writeMeta(`vendor_reset:${providerId}`, String(resetAt));
   }
 
+  /** The key of the period in which exhaustion was recorded (audit §2.5): the stored key equals
+   *  the currently computed key → the quota state is exhausted; a period change makes them differ
+   *  → recovered, no bit and no clear write anywhere. Same schema_meta lane as vendor_reset —
+   *  additive state must not disturb the DDL triple-gate. */
+  readExhaustedKey(providerId: string, period: 'day' | 'month'): string | null {
+    return this.readMeta(`exhausted_${period}:${providerId}`);
+  }
+
+  writeExhaustedKey(providerId: string, period: 'day' | 'month', key: string | null): void {
+    if (key === null) {
+      this.db.prepare('DELETE FROM schema_meta WHERE key = ?').run(`exhausted_${period}:${providerId}`);
+      return;
+    }
+    this.writeMeta(`exhausted_${period}:${providerId}`, key);
+  }
+
   listProviders(): ProviderRow[] {
     return this.db.prepare('SELECT * FROM provider_state ORDER BY provider_id').all() as unknown as ProviderRow[];
   }
@@ -181,7 +203,11 @@ export class SqliteAdapter {
 
   /**
    * Clear bits. Uses bitwise AND-NOT, and **must not** read-modify-write.
-   * When clearing bits leaves all transient bits at zero, retry_after is cleared along with them.
+   *
+   * Deliberately does NOT null `retry_after`: since audit §2.1 the cooldown's only persisted
+   * truth is `retry_after` (the cooldown bits are retired legacy slots), so a bit clear on a
+   * legacy row must never wipe a still-running cooldown. Nulling happens explicitly at expiry
+   * or success, in the state machine.
    */
   clearBits(providerId: string, mask: number): void {
     if (!isKnownMask(mask)) throw new Error(`Illegal bitmask: ${mask}`);
@@ -190,15 +216,6 @@ export class SqliteAdapter {
     this.db
       .prepare('UPDATE provider_state SET is_available = is_available & ~?, updated_at = ? WHERE provider_id = ?')
       .run(mask, now, providerId);
-    // once all transient bits are cleared, retry_after no longer means anything
-    this.db
-      .prepare(
-        `UPDATE provider_state
-            SET retry_after = NULL
-          WHERE provider_id = ?
-            AND (is_available & ?) = 0`,
-      )
-      .run(providerId, TRANSIENT_BIT_MASK);
   }
 
   setRetryAfter(providerId: string, at: number | null): void {

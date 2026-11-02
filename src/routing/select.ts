@@ -10,11 +10,24 @@ export interface Candidate {
   readonly isEnable: boolean;
   readonly isAvailable: number;
   readonly capabilities: readonly Capability[];
+  /** Derived cooldown state (audit §2.1): a future `retry_after`, already nulled when expired.
+   *  Optional for hand-built literals; absent means not cooling. */
+  readonly cooldownUntil?: number | null;
+  /** Derived quota state (audit §2.5): the stored exhausted-period key equals the current key.
+   *  Optional for hand-built literals; absent means not exhausted. */
+  readonly dayExhausted?: boolean;
+  readonly monthExhausted?: boolean;
 }
 
-/** Call condition: `is_enable = 1` and `is_available = 0`. */
+/** Call condition: `is_enable = 1`, no live bit, no running cooldown, no in-window exhaustion. */
 export function isUsable(candidate: Candidate): boolean {
-  return candidate.isEnable && candidate.isAvailable === 0;
+  return (
+    candidate.isEnable &&
+    candidate.isAvailable === 0 &&
+    !candidate.cooldownUntil &&
+    !candidate.dayExhausted &&
+    !candidate.monthExhausted
+  );
 }
 
 /**
@@ -45,7 +58,7 @@ export function planSelection(candidates: readonly Candidate[], capability: Capa
   for (const candidate of withCapability) {
     if (!candidate.isEnable) {
       excluded.push({ candidate, reason: 'disabled' });
-    } else if (candidate.isAvailable !== 0) {
+    } else if (!isUsable(candidate)) {
       excluded.push({ candidate, reason: 'unavailable' });
     } else {
       usable.push(candidate);

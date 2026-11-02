@@ -8,6 +8,7 @@ import { parseConfig } from '../src/config/load.js';
 import { loadCredentials } from '../src/credentials/load.js';
 import { ADAPTERS, createSchemaLookup } from '../src/providers/registry.js';
 import { BIT } from '../src/db/bits.js';
+import { monthKey, DEFAULT_TIMEZONE } from '../src/db/period.js';
 import { mergeDefaultProviders } from '../src/config/defaults.js';
 import type { ProviderAdapter } from '../src/providers/types.js';
 
@@ -109,7 +110,7 @@ test('when the first choice fails it automatically switches to the next provider
   assert.equal(h.db.getProvider('tavily')?.month_used ?? 0, 0, 'a failed provider must not be charged');
 
   const tavily = h.db.getProvider('tavily');
-  assert.notEqual((tavily?.is_available ?? 0) & BIT.TRANSIENT, 0, 'a transient failure must set the cooldown bit');
+  assert.equal((tavily?.is_available ?? 0) & BIT.TRANSIENT, 0, 'cooldown is not a bit (audit §2.1)');
   assert.ok((tavily?.retry_after ?? 0) > 0, 'a cooldown must have an expiry time');
   h.close();
 });
@@ -125,7 +126,12 @@ test('quota exhaustion sets the bit and switches providers — no consecutive-fa
   assert.equal(result.ok, true);
 
   const tavily = h.db.getProvider('tavily');
-  assert.notEqual((tavily?.is_available ?? 0) & BIT.QUOTA_MONTH, 0, '402 must set the monthly quota bit');
+  assert.equal((tavily?.is_available ?? 0) & BIT.QUOTA_MONTH, 0, '402 writes the exhausted-period key, not the bit');
+  assert.equal(
+    h.db.readExhaustedKey('tavily', 'month'),
+    monthKey(tavily?.reset_timezone ?? DEFAULT_TIMEZONE, Date.now()),
+    '402 must persist the monthly exhausted-period key',
+  );
   assert.equal(tavily?.transient_streak, 0, 'quota exhaustion must not count toward the transient failure streak');
   h.close();
 });
@@ -247,17 +253,17 @@ test('candidacy is restored automatically once the cooldown expires, with no tim
   });
 
   await h.engine.search({ query: 'x' });
-  assert.notEqual((h.db.getProvider('tavily')?.is_available ?? 0) & BIT.TRANSIENT, 0);
+  assert.ok((h.db.getProvider('tavily')?.retry_after ?? 0) > 0, 'the failure persists as a future retry_after');
 
   // cooldown not yet expired: still unusable
   clock.now += 100;
   h.engine.status();
-  assert.notEqual((h.db.getProvider('tavily')?.is_available ?? 0) & BIT.TRANSIENT, 0);
+  assert.ok((h.db.getProvider('tavily')?.retry_after ?? 0) > clock.now, 'the cooldown has not expired, so it should not recover');
 
   // past the 60s cap: the next status() call resets it lazily, no timer involved
   clock.now += 61_000;
   h.engine.status();
-  assert.equal((h.db.getProvider('tavily')?.is_available ?? 0) & BIT.TRANSIENT, 0, 'an expired cooldown must recover automatically');
+  assert.equal(h.db.getProvider('tavily')?.retry_after, null, 'an expired cooldown must recover automatically (audit §2.1)');
   h.close();
 });
 

@@ -40,7 +40,7 @@ test('the first call initializes the period keys and does not falsely report a p
   db.close();
 });
 
-test('a day boundary clears the daily quota bit and zeroes the day counter; the month counter is unaffected', () => {
+test('a day boundary zeroes the day counter; the month counter is unaffected; legacy bits are swept', () => {
   const clock = { now: Date.UTC(2026, 9, 29, 12) };
   const db = openDb(clock);
   applyResets(db, 'p1', ctx(clock));
@@ -56,8 +56,7 @@ test('a day boundary clears the daily quota bit and zeroes the day counter; the 
   const row = db.getProvider('p1');
   assert.equal(row?.day_used, 0, 'the day counter should be zeroed');
   assert.equal(row?.month_used, 300, 'the month counter must not be zeroed by the day period');
-  assert.equal(row?.is_available & BIT.QUOTA_DAY, 0, 'the daily quota bit should be cleared');
-  assert.notEqual(row?.is_available & BIT.QUOTA_MONTH, 0, 'the monthly quota bit should be preserved');
+  assert.equal(row?.is_available, 0, 'the legacy quota bits are derived states, so they are swept (audit §2.5)');
   db.close();
 });
 
@@ -87,20 +86,20 @@ test('multiple reasons coexist: clearing one of the bits must not make the provi
   const db = openDb(clock);
   applyResets(db, 'p1', ctx(clock));
 
-  db.setBits('p1', BIT.CREDENTIAL_MISSING | BIT.QUOTA_MONTH);
+  db.setBits('p1', BIT.CREDENTIAL_MISSING | BIT.QUOTA_UNKNOWN);
   assert.deepEqual(decodeReasons(db.getProvider('p1')?.is_available ?? 0), [
-    'quota_exhausted_month',
+    'quota_exhausted_unknown',
     'credential_missing',
   ]);
 
-  // credentials are supplied; only the credential bit should be cleared
+  // credentials are supplied; only the legacy credential bit is migrated away
   const outcome = applyResets(
     db,
     'p1',
     ctx(clock, { credentialsPresent: true, credentialFingerprint: 'fp-1' }),
   );
-  assert.equal(outcome.usableAfter, false, 'the monthly quota is still exhausted, so it must not become usable');
-  assert.deepEqual(decodeReasons(db.getProvider('p1')?.is_available ?? 0), ['quota_exhausted_month']);
+  assert.equal(outcome.usableAfter, false, 'the unknown quota state is a live bit, so it must not become usable');
+  assert.deepEqual(decodeReasons(db.getProvider('p1')?.is_available ?? 0), ['quota_exhausted_unknown']);
   db.close();
 });
 
@@ -119,17 +118,18 @@ test('clearing bits is a bitwise operation and does not overwrite other bits tha
   db.close();
 });
 
-test('a transient bit recovers automatically once it expires', () => {
+test('a cooldown recovers automatically once its retry_after expires (legacy bit swept)', () => {
   const clock = { now: Date.UTC(2026, 9, 29, 12) };
   const db = openDb(clock);
   applyResets(db, 'p1', ctx(clock));
 
   db.setBits('p1', BIT.TRANSIENT, clock.now + 60_000);
-  assert.notEqual(db.getProvider('p1')?.is_available, 0);
+  assert.notEqual(db.getProvider('p1')?.retry_after, null);
 
   clock.now += 30_000;
   applyResets(db, 'p1', ctx(clock));
-  assert.notEqual(db.getProvider('p1')?.is_available, 0, 'the cooldown has not expired, so it should not recover');
+  assert.ok((db.getProvider('p1')?.retry_after ?? 0) > clock.now, 'the cooldown has not expired, so it should not recover');
+  assert.equal(db.getProvider('p1')?.is_available, 0, 'the legacy cooldown bit is swept, the cooldown lives in retry_after (audit §2.1)');
 
   // past the 60s expiry: recovers
   clock.now += 31_000;

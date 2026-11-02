@@ -224,7 +224,7 @@ test('#5 redact is best-effort: known shapes are replaced (but no security guara
 // #8b when the day bit and the month bit are both present, the reported period must not be wrong
 // ---------------------------------------------------------------------------
 
-test('#8b when only the daily quota is exhausted, a leftover month bit must not make it report a monthly quota', async () => {
+test('#8b when only the daily quota is exhausted, a leftover monthly state must not make it report a monthly quota', async () => {
   const clock = { now: Date.UTC(2026, 9, 29, 12) };
   const bothAdapter: ProviderAdapter = {
     id: 'tavily',
@@ -244,16 +244,17 @@ test('#8b when only the daily quota is exhausted, a leftover month bit must not 
 
   const h = makeEngine({ adapters: [bothAdapter], now: () => clock.now });
 
-  // Actually make one call first, so that the day bit gets set
+  // Actually make one call first, so that the day exhaustion gets a key
   await h.engine.search({ query: 'x' });
-  assert.notEqual((h.db.getProvider('tavily')?.is_available ?? 0) & BIT.QUOTA_DAY, 0);
+  assert.equal(h.db.readExhaustedKey('tavily', 'day'), '2026-10-29', 'the day exhaustion is recorded in the current day key');
 
-  // Then artificially leave a leftover month bit behind (e.g. a remnant of a previous monthly exhaustion)
-  h.db.setBits('tavily', BIT.QUOTA_MONTH);
+  // Then artificially leave a leftover monthly state behind (e.g. a remnant of a previous monthly exhaustion)
+  h.db.writeExhaustedKey('tavily', 'month', '2026-10');
+  h.db.setBits('tavily', BIT.QUOTA_MONTH); // legacy slot remnant: must be swept, never consulted
 
   const p = h.engine.status(false).find((x) => x.id === 'tavily');
   assert.ok(p);
-  assert.equal(p.period, 'day', 'the day bit must take precedence over the leftover month bit');
+  assert.equal(p.period, 'day', 'the day state must take precedence over the leftover monthly state');
   h.close();
 });
 

@@ -41,15 +41,16 @@ test('brave local budget: ceiling reached → refused before the request, state 
   assert.equal(result.ok, false);
   const report = result.providers.find((p) => p.id === 'brave');
   assert.ok(report !== undefined, 'brave appears in the refusal report');
-  assert.ok(report.state.includes('quota_exhausted_month'), 'the monthly quota bit drives the refusal state');
+  assert.ok(report.state.includes('quota_exhausted_month'), 'the monthly quota state drives the refusal state');
   assert.equal(report.usable, false);
   // The change log records structural labels only — the free-text evidence belongs to the
-  // report, not the log. The budget brake is identifiable through its labeled set-bit event.
+  // report, not the log. The budget brake is identifiable through its labeled exhausted event.
   const log = h.db.recentChanges('brave');
-  assert.ok(log.some((e) => e.kind === 'bit_set' && /quota_exhausted_month/.test(e.detail ?? '')), 'the budget refusal is labeled structurally');
+  assert.ok(log.some((e) => e.kind === 'exhausted' && /quota_exhausted_month/.test(e.detail ?? '')), 'the budget refusal is labeled structurally');
   assert.ok(log.every((e) => !/k-brave/.test(e.detail ?? '')), 'no credential value may reach the log');
   const row = h.db.getProvider('brave');
-  assert.notEqual((row?.is_available ?? 0) & BIT.QUOTA_MONTH, 0, 'the refusal persists as the monthly quota bit');
+  assert.equal(row?.is_available, 0, 'no quota bit is involved — the state is the exhausted-period key (audit §2.5)');
+  assert.notEqual(h.db.readExhaustedKey('brave', 'month'), null, 'the monthly exhausted key is persisted');
   assert.equal(row?.month_used, 1_000, 'no extra usage is booked for a refused call');
   h.close();
 });

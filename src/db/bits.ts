@@ -1,15 +1,16 @@
 /**
  * Bit definitions for the `is_available` bitmask.
  *
- * Persistent bits recover by **event**; transient bits recover by **time** (retry_after expiry).
- * Multiple causes can coexist: clearing one of them must not make the provider usable; only a
- * mask of zero restores it.
+ * Persistent bits recover by **event** (credential change, vendor-declared reset reached);
+ * cooldown is not a bit at all — it is `retry_after > now` (audit §2.1), and the day/month quota
+ * states are derived from the exhausted-period key (audit §2.5). Old DB files that still carry
+ * the retired slots decode tolerantly and are migrated at the next refresh.
  */
 
 export const BIT = {
-  /** Daily quota exhausted */
+  /** [LEGACY] Daily quota exhausted — retired: derived from the exhausted-period key. Old files decode; never set by new code. */
   QUOTA_DAY: 1 << 0,
-  /** Monthly quota exhausted */
+  /** [LEGACY] Monthly quota exhausted — retired: derived from the exhausted-period key. Old files decode; never set by new code. */
   QUOTA_MONTH: 1 << 1,
   /**
    * [LEGACY] Credential missing — retired: derivable at read time from the config×credentials
@@ -18,9 +19,9 @@ export const BIT = {
   CREDENTIAL_MISSING: 1 << 2,
   /** Credential rejected (provider 401, or the authentication semantics of 403) */
   CREDENTIAL_REJECTED: 1 << 3,
-  /** Network / timeout / 5xx / parse failure — transient */
+  /** [LEGACY] Network / timeout / 5xx / parse failure — retired: cooldown is derived from retry_after. Old files decode; never set by new code. */
   TRANSIENT: 1 << 4,
-  /** 429 rate limiting that clearly belongs to a short window — transient */
+  /** [LEGACY] 429 rate limiting of a short window — retired: cooldown is derived from retry_after. Old files decode; never set by new code. */
   RATE_LIMITED_SHORT: 1 << 5,
   /**
    * [LEGACY] The retired paid gate. Constants remain so old DB files decode and are migrated;
@@ -42,23 +43,38 @@ export type BitName = keyof typeof BIT;
 /** All defined bits, used for mask validation and state decoding. */
 export const ALL_BITS: readonly number[] = Object.values(BIT);
 
-/** Bits that recover by time: a retry_after must be given when setting them. */
+/**
+ * Bits that a legacy write path could set with a `retry_after`. New code never touches bits for
+ * cooldown (audit §2.1) — the mask survives only because `setBits` keeps its legacy guard and
+ * the migration clears the slots.
+ */
 export const TRANSIENT_BIT_MASK = BIT.TRANSIENT | BIT.RATE_LIMITED_SHORT;
 
-/** Bits that recover by event: period boundary, credential appearing or changing, config change */
-export const PERSISTENT_BIT_MASK =
+/** Bits that recover by event: credential appearing or changing, vendor-declared reset reached. */
+export const PERSISTENT_BIT_MASK = BIT.QUOTA_UNKNOWN | BIT.CREDENTIAL_REJECTED;
+
+/**
+ * Legacy slots: old DB files may carry them; migrated unconditionally at refresh. Covers the
+ * retired credential-missing/paid slots, the four time-derived states (cooldown ×2, quota day ×
+ * month) and nothing else — QUOTA_UNKNOWN and CREDENTIAL_REJECTED remain live bits.
+ */
+export const LEGACY_BIT_MASK =
+  BIT.CREDENTIAL_MISSING |
+  BIT.PAID_NOT_ALLOWED |
   BIT.QUOTA_DAY |
   BIT.QUOTA_MONTH |
-  BIT.QUOTA_UNKNOWN |
-  BIT.CREDENTIAL_REJECTED;
-
-/** Legacy slots (old DB files may carry them; migrated unconditionally at refresh). */
-export const LEGACY_BIT_MASK = BIT.CREDENTIAL_MISSING | BIT.PAID_NOT_ALLOWED;
+  BIT.TRANSIENT |
+  BIT.RATE_LIMITED_SHORT;
 
 /** Bits that a period boundary **must not** clear */
 export const PERIOD_IRRELEVANT_BIT_MASK = BIT.QUOTA_UNKNOWN | BIT.CREDENTIAL_REJECTED;
 
-/** Reason labels presented externally by the state machine; used for structured rejection and the status tool, not involved in decisions. */
+/**
+ * Reason labels presented externally; used for structured rejection and the status tool.
+ * `cooldown` is the P0-2 collapsed label of the formerly distinct `transient_failure` /
+ * `rate_limited_short` pair — derived from `retry_after`, not decoded from any bit. The two
+ * legacy labels survive only in the decode of not-yet-migrated old files.
+ */
 export type Reason =
   | 'quota_exhausted_day'
   | 'quota_exhausted_month'
@@ -67,6 +83,7 @@ export type Reason =
   | 'credential_rejected'
   | 'transient_failure'
   | 'rate_limited_short'
+  | 'cooldown'
   | 'paid_not_allowed'
   | 'unknown';
 

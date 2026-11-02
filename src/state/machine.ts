@@ -1,9 +1,10 @@
 /**
  * State reset and gate synchronization.
  *
- * Only a cause with a determinable recovery condition may set a bit: persistent bits (quota,
- * credentials, paid gate) recover on an event; transient bits (network, short-window limiting)
- * recover when `retry_after` expires. All resets are lazy — decided before each call, no timer.
+ * Only a cause with a determinable recovery condition may persist a refusal state: the live bits
+ * (quota-unknown, credential-rejected) recover on an event; cooldown is `retry_after` alone and
+ * expires when the timestamp passes (audit §2.1). All resets are lazy — decided before each call,
+ * no timer.
  */
 import type { SqliteAdapter, ProviderRow } from '../db/sqlite.js';
 import { BIT, LEGACY_BIT_MASK, decodeReasons, type Reason } from '../db/bits.js';
@@ -34,10 +35,11 @@ export interface ResetOutcome {
 /**
  * One lazy reset check; must run before availability is read.
  *
- * Clearing rules: day/month boundary → QUOTA_DAY / QUOTA_MONTH (day and month are independent and
- * the first init never counts as a boundary); `retry_after` reached → TRANSIENT | RATE_LIMITED_SHORT;
- * legacy slots (credential-missing/paid) are migrated unconditionally; credential fingerprint
- * changed → CREDENTIAL_REJECTED (presence alone is not enough, and a change only permits a retry).
+ * Clearing rules: day/month boundary → counters zeroed and keys advanced (quota STATES are
+ * derived from the exhausted-period key); `retry_after` reached → cooldown cleared;
+ * legacy slots (credential-missing/paid, the four retired time-derived states) are migrated
+ * unconditionally; credential fingerprint changed → CREDENTIAL_REJECTED cleared; vendor-declared
+ * reset reached → QUOTA_UNKNOWN cleared (lane A).
  */
 export function applyResets(adapter: SqliteAdapter, providerId: string, ctx: ResetContext): ResetOutcome {
   adapter.ensureProvider(providerId);
@@ -55,12 +57,11 @@ export function applyResets(adapter: SqliteAdapter, providerId: string, ctx: Res
   const dayResets = quotaPeriod === 'day' || quotaPeriod === 'both';
   const monthResets = quotaPeriod === 'month' || quotaPeriod === 'both';
 
-  // 1) Day period boundary: zero the counters and clear "daily quota exhausted"
+  // 1) Day period boundary: zero the counters and advance the key. The quota STATE is derived
+  //    from the exhausted-period key (audit §2.5) — no bit is cleared here.
   if (row.day_key !== keys.day) {
-    const isFirstInit = row.day_key === null;
     adapter.resetPeriod(providerId, 'day', keys.day);
-    if (!isFirstInit && dayResets) {
-      adapter.clearBits(providerId, BIT.QUOTA_DAY);
+    if (row.day_key !== null && dayResets) {
       periodResets.push('day');
       adapter.log({ providerId, at: ctx.now, kind: 'period_reset', detail: `day ${row.day_key} → ${keys.day}` });
     }
@@ -68,27 +69,24 @@ export function applyResets(adapter: SqliteAdapter, providerId: string, ctx: Res
 
   // 2) Month period boundary. Independent of the day period — one expiring must not zero the other's counters.
   if (row.month_key !== keys.month) {
-    const isFirstInit = row.month_key === null;
     adapter.resetPeriod(providerId, 'month', keys.month);
-    if (!isFirstInit && monthResets) {
-      adapter.clearBits(providerId, BIT.QUOTA_MONTH);
+    if (row.month_key !== null && monthResets) {
       periodResets.push('month');
       adapter.log({ providerId, at: ctx.now, kind: 'period_reset', detail: `month ${row.month_key} → ${keys.month}` });
     }
   }
 
-  // 3) Transient bit cooldown expired
+  // 3) Cooldown expired: retry_after is the single persisted cooldown truth (audit §2.1) —
+  //    nulling it is the entire recovery; legacy cooldown bits are swept by gate 4.
   if (row.retry_after !== null && row.retry_after <= ctx.now) {
-    const had = row.is_available & (BIT.TRANSIENT | BIT.RATE_LIMITED_SHORT);
-    adapter.clearBits(providerId, BIT.TRANSIENT | BIT.RATE_LIMITED_SHORT);
     adapter.setRetryAfter(providerId, null);
-    if (had !== 0) {
-      adapter.log({ providerId, at: ctx.now, kind: 'bit_clear', detail: `cooldown expired (${had})` });
-    }
+    adapter.log({ providerId, at: ctx.now, kind: 'cooldown_clear', detail: `cooldown expired (until ${row.retry_after})` });
   }
 
-  // 4) Legacy slots (old files) are migrated unconditionally: the credential-missing bit is
-  //    derivable at read time and the paid gate is retired; no gate re-sets either.
+  // 4) Legacy slots (old files) are migrated unconditionally: the credential-missing/paid slots
+  //    are retired, and the cooldown/quota bits are derivable from retry_after / the exhausted
+  //    period key. `clearBits` never nulls retry_after, so a still-running cooldown survives the
+  //    sweep; no gate re-sets any of these slots.
   const legacy = row.is_available & LEGACY_BIT_MASK;
   if (legacy !== 0) {
     adapter.clearBits(providerId, LEGACY_BIT_MASK);

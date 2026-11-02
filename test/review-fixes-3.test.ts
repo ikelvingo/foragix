@@ -24,6 +24,7 @@ import { ConfigError } from '../src/config/types.js';
 import { createSchemaLookup, ADAPTERS } from '../src/providers/registry.js';
 import { describeError, redact } from '../src/errors/redact.js';
 import { BIT, PERSISTENT_BIT_MASK, PERIOD_IRRELEVANT_BIT_MASK, decodeReasons } from '../src/db/bits.js';
+import { dayKey, monthKey } from '../src/db/period.js';
 
 const DDL = readFileSync(new URL('../../sql/schema.sql', import.meta.url), 'utf8');
 
@@ -177,10 +178,7 @@ test('quotaPeriod explicitly day/month still falls back to the declared period',
   const { Engine } = await import('../src/engine.js');
   const { loadCredentials } = await import('../src/credentials/load.js');
 
-  for (const [declared, expectedBit] of [
-    ['day', BIT.QUOTA_DAY],
-    ['month', BIT.QUOTA_MONTH],
-  ] as const) {
+  for (const declared of ['day', 'month'] as const) {
     const adapter = {
       id: 'tavily',
       capabilities: ['search'] as const,
@@ -229,7 +227,11 @@ providers:
       await engine.search({ query: 'x' });
 
       const mask = db.getProvider('tavily')?.is_available ?? 0;
-      assert.notEqual(mask & expectedBit, 0, `quotaPeriod=${declared} must fall back to the matching bit`);
+      assert.equal(
+        db.readExhaustedKey('tavily', declared),
+        declared === 'day' ? dayKey('UTC', Date.now()) : monthKey('UTC', Date.now()),
+        `quotaPeriod=${declared} must fall back to its matching exhausted-period key`,
+      );
       assert.equal(mask & BIT.QUOTA_UNKNOWN, 0, 'a clear declaration must not land on the unknown bit');
       db.close();
     } finally {

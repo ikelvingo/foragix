@@ -270,6 +270,7 @@ export class Engine {
         isEnable: row.is_enable === 1,
         isAvailable: row.is_available,
         capabilities: adapter.capabilities,
+        ...this.derivedAccessibility(provider.id, row),
       });
     }
     return { failed, candidates };
@@ -296,6 +297,31 @@ export class Engine {
     const timezone = row?.reset_timezone ?? DEFAULT_TIMEZONE;
     const now = this.deps.now();
     return { day: dayKey(timezone, now), month: monthKey(timezone, now) };
+  }
+
+  /**
+   * The derived unavailability states read out of a row in one place (audit §2.1 / §2.5):
+   * a running cooldown (future `retry_after`) and the exhausted-period keys equal to the
+   * currently computed keys. An invalid persisted timezone derives nothing (false/null) —
+   * an invalid `init` timezone is already disabled at the load phase before a row can be
+   * reported with it.
+   */
+  private derivedAccessibility(providerId: string, row: ProviderRow): {
+    cooldownUntil: number | null;
+    dayExhausted: boolean;
+    monthExhausted: boolean;
+  } {
+    const now = this.deps.now();
+    const cooldownUntil = row.retry_after !== null && row.retry_after > now ? row.retry_after : null;
+    if (!isValidTimezone(row.reset_timezone ?? DEFAULT_TIMEZONE)) {
+      return { cooldownUntil, dayExhausted: false, monthExhausted: false };
+    }
+    const timezone = row.reset_timezone ?? DEFAULT_TIMEZONE;
+    return {
+      cooldownUntil,
+      dayExhausted: this.deps.db.readExhaustedKey(providerId, 'day') === dayKey(timezone, now),
+      monthExhausted: this.deps.db.readExhaustedKey(providerId, 'month') === monthKey(timezone, now),
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -344,7 +370,7 @@ export class Engine {
           const period = declared ?? (quotaPeriod === 'both' ? classification.period : null);
 
           if (period === null) {
-            // A dedicated bit, not the day/month bits: those would report a month
+            // A dedicated bit, not the day/month lanes: those would report a period
             // that the adapter never declared.
             this.deps.db.setBits(providerId, BIT.QUOTA_UNKNOWN);
             this.deps.db.log({ providerId, at: now, kind: 'rejected', detail: 'quota_exhausted_unknown' });
@@ -357,13 +383,18 @@ export class Engine {
             break;
           }
 
-          const bit = period === 'day' ? BIT.QUOTA_DAY : BIT.QUOTA_MONTH;
-          this.deps.db.setBits(providerId, bit);
+          // The exhausted state is the exhausted-period KEY, not a bit (audit §2.5): recovery is
+          // the stored key stopping to equal the current key — one calendar compare, no clear.
+          const row = this.deps.db.getProvider(providerId);
+          const key = period === 'day'
+            ? dayKey(row?.reset_timezone ?? DEFAULT_TIMEZONE, now)
+            : monthKey(row?.reset_timezone ?? DEFAULT_TIMEZONE, now);
+          this.deps.db.writeExhaustedKey(providerId, period, key);
           this.deps.db.log({ providerId, at: now, kind: 'rejected', detail: `quota_exhausted_${period}` });
           this.deps.db.log({
             providerId,
             at: now,
-            kind: 'bit_set',
+            kind: 'exhausted',
             detail: `quota_exhausted_${period} (declared=${quotaPeriod})`,
           });
           break;
@@ -378,11 +409,11 @@ export class Engine {
         case 'rate_limited_short': {
           const row = this.deps.db.getProvider(providerId);
           const streak = (row?.transient_streak ?? 0) + 1;
-          const bit = classification.kind === 'transient' ? BIT.TRANSIENT : BIT.RATE_LIMITED_SHORT;
-          // A Retry-After given by the provider takes precedence over exponential backoff — it is more accurate than our guess
+          // A Retry-After given by the provider takes precedence over exponential backoff — it is more accurate than our guess.
+          // Cooldown is pure `retry_after` since audit §2.1 — no bit is written with it.
           const cooldown = clampCooldown(classification.cooldownMs ?? backoffMs(streak));
           this.deps.db.setTransientStreak(providerId, streak);
-          this.deps.db.setBits(providerId, bit, now + cooldown);
+          this.deps.db.setRetryAfter(providerId, now + cooldown);
           // A short-window rate limit is the provider refusing this request; a 5xx or a timeout
           // is our problem to retry, so only the former counts as a rejection.
           if (classification.kind === 'rate_limited_short') {
@@ -391,7 +422,7 @@ export class Engine {
           this.deps.db.log({
             providerId,
             at: now,
-            kind: 'bit_set',
+            kind: 'cooldown_set',
             detail: `${classification.kind} (streak ${streak}, cooldown ${cooldown}ms)`,
           });
           break;
@@ -425,7 +456,8 @@ export class Engine {
   ): void {
     const now = this.deps.now();
     this.deps.db.transaction(() => {
-      this.deps.db.clearBits(providerId, BIT.TRANSIENT | BIT.RATE_LIMITED_SHORT);
+      // Cooldown recovery on success: null the sole persisted truth (audit §2.1) and zero the
+      // streak — no bits are involved.
       this.deps.db.setRetryAfter(providerId, null);
       this.deps.db.setTransientStreak(providerId, 0);
 
@@ -669,40 +701,49 @@ export class Engine {
   }
 
   private reportFor(provider: ProviderConfig, adapter: ProviderAdapter, row: ProviderRow): ProviderReport {
-    const state = decodeReasons(row.is_available);
+    // Quota day/month and cooldown are derived (audit §2.1/§2.5); the mask still carries the
+    // live bits (quota-unknown, credential-rejected) plus the legacy slots of an old file.
+    const state: Reason[] = decodeReasons(row.is_available).filter(
+      (r) => r !== 'quota_exhausted_day' && r !== 'quota_exhausted_month' && r !== 'transient_failure' && r !== 'rate_limited_short',
+    );
+    const derived = this.derivedAccessibility(provider.id, row);
+    if (derived.monthExhausted) state.unshift('quota_exhausted_month');
+    if (derived.dayExhausted) state.unshift('quota_exhausted_day');
+    if (derived.cooldownUntil !== null) state.push('cooldown');
+
     const required = provider.credentials.filter((c) => c.required).map((c) => c.name);
     const missing_env = required.filter((name) => !this.deps.credentials.has(name));
     // Derived credential-missing label occupies the retired bit's snapshot position so the
     // status contract stays stable for callers.
     if (missing_env.length > 0 && !state.includes('credential_missing')) {
-      const at = state.findIndex((r) => r === 'quota_exhausted_unknown' || r === 'credential_rejected' || r === 'transient_failure');
+      const at = state.findIndex((r) => r === 'quota_exhausted_unknown' || r === 'credential_rejected' || r === 'cooldown');
       state.splice(at === -1 ? state.length : at, 0, 'credential_missing');
     }
     const init = adapter.init(provider.account);
     const needs_migration = row.needs_migration === 1;
     const disabledReason = this.disabled.get(provider.id) ?? null;
 
-    // Period attribution comes from the declared quotaPeriod, never from which bit happens to be set.
+    // Period attribution comes from the declared quotaPeriod, never from which bit happens to be set;
+    // the derived exhaustion already carries the declared-period gating from the write path.
     let period: 'day' | 'month' | null = null;
-    if (init.quotaPeriod === 'day' || init.quotaPeriod === 'both') {
-      if ((row.is_available & BIT.QUOTA_DAY) !== 0) period = 'day';
-    }
-    if (period === null && (init.quotaPeriod === 'month' || init.quotaPeriod === 'both')) {
-      if ((row.is_available & BIT.QUOTA_MONTH) !== 0) period = 'month';
+    if (derived.dayExhausted && (init.quotaPeriod === 'day' || init.quotaPeriod === 'both')) period = 'day';
+    if (period === null && derived.monthExhausted && (init.quotaPeriod === 'month' || init.quotaPeriod === 'both')) {
+      period = 'month';
     }
 
     let resets_at: number | null = null;
-    if ((row.is_available & (BIT.TRANSIENT | BIT.RATE_LIMITED_SHORT)) !== 0) {
-      resets_at = row.retry_after;
+    if (derived.cooldownUntil !== null) {
+      resets_at = derived.cooldownUntil;
     } else if (period !== null) {
       resets_at = nextPeriodBoundary(period, row.reset_timezone ?? DEFAULT_TIMEZONE, this.deps.now());
     }
 
-    // Usability mirrors routing: the legacy credential bit is retired, so the derived
-    // config×credentials predicate joins the availability check here as well.
+    // Usability mirrors routing: the mask, the derived cooldown and the derived quota states
+    // join the same predicate — the retired bits live on only as derived states.
     const credentialReady = missing_env.length === 0;
     const usable = !needs_migration && disabledReason === null && row.is_enable === 1
-      && credentialReady && row.is_available === 0;
+      && credentialReady && row.is_available === 0
+      && derived.cooldownUntil === null && !derived.dayExhausted && !derived.monthExhausted;
 
     return {
       id: provider.id,
@@ -869,8 +910,7 @@ function actionFor(input: {
   } else if (state.includes('quota_exhausted_day') || state.includes('quota_exhausted_month')) {
     actions.push('the quota is exhausted, but the reset period cannot be determined; manual confirmation is required');
   }
-  if (state.includes('transient_failure')) actions.push('in cooldown after a transient failure, it recovers automatically later');
-  if (state.includes('rate_limited_short')) actions.push('in cooldown after short-window rate limiting, it recovers automatically later');
+  if (state.includes('cooldown')) actions.push('in cooldown, it recovers automatically later');
   if (state.includes('unknown')) actions.push('there are unknown state bits; check version consistency');
   return actions.length > 0 ? actions.join('; ') : 'unusable';
 }

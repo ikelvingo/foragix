@@ -11,6 +11,7 @@ import { parseConfig } from '../src/config/load.js';
 import { loadCredentials } from '../src/credentials/load.js';
 import { createSchemaLookup } from '../src/providers/registry.js';
 import { BIT } from '../src/db/bits.js';
+import { dayKey, monthKey } from '../src/db/period.js';
 import { describeError } from '../src/errors/redact.js';
 import type { ProviderAdapter } from '../src/providers/types.js';
 
@@ -153,30 +154,32 @@ test('the evidence of transient / rate_limited_short is likewise not persisted',
 // ---------------------------------------------------------------------------
 
 test('period matrix: when a single period is declared, fall back to the declaration', async () => {
-  const cases: Array<['day' | 'month', number]> = [
-    ['day', BIT.QUOTA_DAY],
-    ['month', BIT.QUOTA_MONTH],
-  ];
-  for (const [declared, bit] of cases) {
+  const cases: Array<'day' | 'month'> = ['day', 'month'];
+  for (const declared of cases) {
     const h = runOnce(adapterReturning({ kind: 'quota', period: null, evidence: 'x' }, declared));
     await h.engine.search({ query: 'x' });
-    const mask = h.db.getProvider('tavily')?.is_available ?? 0;
-    assert.notEqual(mask & bit, 0, `quotaPeriod=${declared} should fall back to the corresponding bit`);
-    assert.equal(mask & BIT.QUOTA_UNKNOWN, 0);
+    const storedKey = h.db.readExhaustedKey('tavily', declared);
+    assert.equal(
+      storedKey,
+      declared === 'day' ? dayKey('UTC', Date.now()) : monthKey('UTC', Date.now()),
+      `quotaPeriod=${declared} should fall back to the corresponding exhausted-period key`,
+    );
+    assert.equal((h.db.getProvider('tavily')?.is_available ?? 0) & BIT.QUOTA_UNKNOWN, 0);
     h.db.close();
   }
 });
 
 test('period matrix: both + an explicit period → use the explicit period', async () => {
-  for (const [explicit, bit] of [
-    ['day', BIT.QUOTA_DAY],
-    ['month', BIT.QUOTA_MONTH],
-  ] as const) {
+  for (const explicit of ['day', 'month'] as const) {
     const h = runOnce(adapterReturning({ kind: 'quota', period: explicit, evidence: 'x' }, 'both'));
     await h.engine.search({ query: 'x' });
-    const mask = h.db.getProvider('tavily')?.is_available ?? 0;
-    assert.notEqual(mask & bit, 0, `both + period=${explicit} should apply the explicit period`);
-    assert.equal(mask & BIT.QUOTA_UNKNOWN, 0);
+    const storedKey = h.db.readExhaustedKey('tavily', explicit);
+    assert.equal(
+      storedKey,
+      explicit === 'day' ? dayKey('UTC', Date.now()) : monthKey('UTC', Date.now()),
+      `both + period=${explicit} should apply the explicit period`,
+    );
+    assert.equal((h.db.getProvider('tavily')?.is_available ?? 0) & BIT.QUOTA_UNKNOWN, 0);
     h.db.close();
   }
 });
