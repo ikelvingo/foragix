@@ -1,6 +1,6 @@
 # foragix
 
-foragix is a web-search and page-fetch tool for AI agents, backed by a pool of 19 providers with automatic failover.
+foragix is a web-search and page-fetch tool for AI agents: it pools the free quotas of 19 providers — whoever still has free quota goes first, and spent ones fail over automatically.
 
 ## Quick start
 
