@@ -96,3 +96,29 @@ export function renderDefaultConfigYaml(adapters: readonly ProviderAdapter[]): s
 
   return out.join('\n');
 }
+
+/**
+ * Config for merged default entries: every registered adapter the user's config does not
+ * mention gets its own default entry — exactly what a generated config would have contained.
+ * A config therefore stays authoritative even when written against a smaller roster: newly
+ * implemented providers join the pool automatically, sensitive ones (defaultEnabled false)
+ * stay off until the owner turns them on.
+ */
+export function mergeDefaultProviders(config: Config, adapters: readonly ProviderAdapter[]): Config {
+  const declared = new Set(config.providers.map((p) => p.id));
+  const additions: ProviderConfig[] = [];
+  let next = config.providers.length === 0 ? 0 : Math.max(...config.providers.map((p) => p.priority));
+  for (const adapter of adapters) {
+    if (declared.has(adapter.id)) continue;
+    next += PRIORITY_STEP;
+    additions.push({
+      id: adapter.id,
+      enabled: adapter.schema.defaultEnabled ?? true,
+      priority: next,
+      credentials: adapter.schema.credentialNames.map((name) => ({ name, required: true })),
+      account: {},
+      allowPaid: null,
+    });
+  }
+  return additions.length === 0 ? config : { ...config, providers: [...config.providers, ...additions] };
+}

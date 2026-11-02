@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildDefaultConfig } from './config/defaults.js';
+import { buildDefaultConfig, mergeDefaultProviders } from './config/defaults.js';
 import { loadConfigFile } from './config/load.js';
 import type { Config } from './config/types.js';
 import { loadCredentials, type CredentialView } from './credentials/load.js';
@@ -65,7 +65,7 @@ function readDdl(): string {
  *
  * All initialization is done at load time: config validation → credential resolution → database
  * readiness (including copying from the seed) → status row seeding → static value re-seeding →
- * paid gating sync. **The first call performs no initialization at all.**
+ * gate sync (credential presence; brave's local cap is enforced per call). **The first call performs no initialization at all.**
  */
 export function createForagix(options: ForagixOptions): Foragix {
   const adapters = options.adapters ?? ADAPTERS;
@@ -76,7 +76,7 @@ export function createForagix(options: ForagixOptions): Foragix {
   const config =
     options.configPath === null
       ? buildDefaultConfig(adapters)
-      : loadConfigFile(options.configPath, { lookup });
+      : mergeDefaultProviders(loadConfigFile(options.configPath, { lookup }), adapters);
 
   const credentials: CredentialView = loadCredentials({
     ...(options.env === undefined ? {} : { env: options.env }),

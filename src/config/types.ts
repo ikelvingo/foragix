@@ -29,6 +29,21 @@ export interface ProviderSchema {
    * configuration is a provider-level error (an omitted declaration).
    */
   readonly requiresCredentials?: boolean;
+  /**
+   * Source-side default for the generated config's `enabled` flag (default true).
+   * Providers whose consumption depends on an account-side subscription/prepaid setup the
+   * skill cannot verify declare `false`: a fresh install must not call them until the owner
+   * turns them on in the config. An explicit config value always wins over this default.
+   */
+  readonly defaultEnabled?: boolean;
+  /**
+   * Enforce the locally counted `dayLimit`/`monthLimit` as a hard pre-call budget: usage
+   * reaching the declared ceiling is refused before the request, and the ordinary quota-bit
+   * machinery recovers it at the period boundary. Only for providers whose free usage
+   * carries real-balance exposure (e.g. a saved payment card). Local counting cannot see
+   * other clients of the same account — an approximate brake, hence opt-in per provider.
+   */
+  readonly localCap?: boolean;
 }
 
 export interface SchemaLookup {

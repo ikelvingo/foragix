@@ -48,6 +48,10 @@ export const zhipuAdapter: ProviderAdapter = {
   schema: {
     id: 'zhipu',
     requiresCredentials: true,
+    // Consumption depends on an account-side subscription/prepaid setup the skill cannot
+    // verify (minimax plan key, zhipu resource pack, deepseek per-call billing). Fresh
+    // installs must not call it until the owner enables it in the config.
+    defaultEnabled: false,
     credentialNames: [CREDENTIAL],
     accountOptions: {},
   },

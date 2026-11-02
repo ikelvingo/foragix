@@ -6,42 +6,58 @@
  */
 import type { ProviderAdapter } from './types.js';
 import type { ProviderSchema, SchemaLookup } from '../config/types.js';
-import { tavilyAdapter } from './tavily/index.js';
-import { exaAdapter } from './exa/index.js';
-import { braveAdapter } from './brave/index.js';
-import { minimaxAdapter } from './minimax/index.js';
-import { firecrawlAdapter } from './firecrawl/index.js';
-import { deepseekAdapter } from './deepseek/index.js';
-import { anysearchAdapter } from './anysearch/index.js';
 import { searxngAdapter } from './searxng/index.js';
-import { youAdapter } from './you/index.js';
+
+import { minimaxAdapter } from './minimax/index.js';
+
 import { tinyfishAdapter } from './tinyfish/index.js';
-import { baiduAdapter } from './baidu/index.js';
-import { zhipuAdapter } from './zhipu/index.js';
-import { linkupAdapter } from './linkup/index.js';
-import { metasoAdapter } from './metaso/index.js';
-import { ollamaAdapter } from './ollama/index.js';
+
+import { youAdapter } from './you/index.js';
+
 import { zhihuAdapter } from './zhihu/index.js';
+
+import { anysearchAdapter } from './anysearch/index.js';
+
+import { ollamaAdapter } from './ollama/index.js';
+
+import { linkupAdapter } from './linkup/index.js';
+
+import { exaAdapter } from './exa/index.js';
+
+import { metasoAdapter } from './metaso/index.js';
+
+import { firecrawlAdapter } from './firecrawl/index.js';
+
+import { tavilyAdapter } from './tavily/index.js';
+
+import { braveAdapter } from './brave/index.js';
+
 import { doubaoAdapter } from './doubao/index.js';
 
+import { baiduAdapter } from './baidu/index.js';
+
+import { deepseekAdapter } from './deepseek/index.js';
+
+import { zhipuAdapter } from './zhipu/index.js';
+
 export const ADAPTERS: readonly ProviderAdapter[] = [
-  tavilyAdapter,
-  exaAdapter,
-  braveAdapter,
-  minimaxAdapter,
-  firecrawlAdapter,
-  deepseekAdapter,
-  anysearchAdapter,
   searxngAdapter,
-  youAdapter,
+  minimaxAdapter,
   tinyfishAdapter,
-  baiduAdapter,
-  zhipuAdapter,
-  linkupAdapter,
-  metasoAdapter,
-  ollamaAdapter,
+  youAdapter,
   zhihuAdapter,
+  anysearchAdapter,
+  ollamaAdapter,
+  linkupAdapter,
+  exaAdapter,
+  metasoAdapter,
+  firecrawlAdapter,
+  tavilyAdapter,
+  braveAdapter,
   doubaoAdapter,
+  baiduAdapter,
+  deepseekAdapter,
+  zhipuAdapter,
 ];
 
 /**

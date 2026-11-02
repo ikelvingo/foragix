@@ -19,7 +19,16 @@ providers:
       - name: TAVILY_API_KEY
         required: true
     account: {}
+  # The merge policy pulls in every adapter this file does not declare, and searxng is the
+  # one provider with no credential requirement — sandbox tests pin it off to stay offline.
+  - id: searxng
+    enabled: false
+    credentials: []
+    account: {}
 `;
+
+// Adjudicated default priority order (free-quota size first); mirrors the registry.
+const DEFAULT_ORDER = ['searxng', 'minimax', 'tinyfish', 'you', 'zhihu', 'anysearch', 'ollama', 'linkup', 'exa', 'metaso', 'firecrawl', 'tavily', 'brave', 'doubao', 'baidu', 'deepseek', 'zhipu'] as const;
 
 interface Sandbox {
   readonly dir: string;
@@ -101,10 +110,14 @@ test('status succeeds offline and reports the provider as unusable without crede
     const body = json(out);
     assert.equal(body['ok'], true);
     const providers = body['providers'] as Array<Record<string, unknown>>;
-    assert.equal(providers.length, 1);
-    assert.equal(providers[0]?.['id'], 'tavily');
-    assert.equal(providers[0]?.['usable'], false);
-    assert.deepEqual(providers[0]?.['state'], ['credential_missing']);
+    // The merge policy appends default entries for every adapter the fixture does not
+    // declare, so the offline roster is the full registry.
+    assert.equal(providers.length, 17);
+    const tavily = providers.find((p) => p['id'] === 'tavily') as Record<string, unknown>;
+    assert.equal(tavily['usable'], false);
+    assert.deepEqual(tavily['state'], ['credential_missing']);
+    const searxng = providers.find((p) => p['id'] === 'searxng') as Record<string, unknown>;
+    assert.equal(searxng['enabled'], false, 'the fixture pinned the credentialless provider off');
   } finally {
     box.cleanup();
   }
@@ -518,7 +531,12 @@ test('no config anywhere runs on the built-in defaults', async () => {
     const out = await run(['status'], { sandbox: box, env: { HOME: box.dir, TAVILY_API_KEY: '' } });
     assert.equal(out.code, EXIT_OK, 'the first run needs no config file');
     const providers = (json(out)['providers'] as Array<Record<string, unknown>>).map((p) => p['id']);
-    assert.deepEqual(providers, ['tavily', 'exa', 'brave', 'minimax', 'firecrawl', 'deepseek', 'anysearch', 'searxng', 'you', 'tinyfish', 'baidu', 'zhipu', 'linkup', 'metaso', 'ollama', 'zhihu', 'doubao'], 'every implemented adapter is enabled by default');
+    assert.deepEqual(providers, [...DEFAULT_ORDER], 'the default config follows the adjudicated free-quota priority order');
+    const byId = new Map(providers.map((id) => [id, id]));
+    for (const sensitive of ['minimax', 'zhipu', 'deepseek']) {
+      assert.ok(DEFAULT_ORDER.includes(sensitive as never), sensitive + ' is declared in the roster');
+    }
+    assert.ok(byId.size === DEFAULT_ORDER.length, 'each roster id is unique');
   } finally {
     box.cleanup();
   }
@@ -532,8 +550,14 @@ test('the default config path sits in ~/.foragix and is read when present', asyn
     writeFileSync(join(home, '.foragix', 'config.yaml'), 'version: 1\nproviders:\n  - id: exa\n', 'utf8');
     const out = await run(['status'], { sandbox: box, env: { HOME: home, EXA_API_KEY: '' } });
     assert.equal(out.code, EXIT_OK);
-    const providers = (json(out)['providers'] as Array<Record<string, unknown>>).map((p) => p['id']);
-    assert.deepEqual(providers, ['exa'], 'a config at the default path must be picked up');
+    const providers = (json(out)['providers'] as Array<Record<string, unknown>>);
+    assert.equal(providers[0]?.['id'], 'exa', 'the declared entry keeps its place');
+    const rest = DEFAULT_ORDER.filter((id) => id !== 'exa');
+    assert.deepEqual(providers.map((p) => p['id']), ['exa', ...rest], 'undeclared adapters are merged in with their own defaults');
+    const byId = new Map(providers.map((p) => [p['id'], p]));
+    for (const sensitive of ['minimax', 'zhipu', 'deepseek']) {
+      assert.equal((byId.get(sensitive) as Record<string, unknown>)?.['enabled'], false, sensitive + ' merged entry stays off by source default');
+    }
     assert.equal(defaultConfigPath({ HOME: home }), join(home, '.foragix', 'config.yaml'));
   } finally {
     box.cleanup();
@@ -553,7 +577,9 @@ test('an explicitly named config must exist and wins over the built-in defaults'
     const out = await run(['status', '--config', mine], { sandbox: box, env: { HOME: box.dir, EXA_API_KEY: '' } });
     assert.equal(out.code, EXIT_OK);
     const providers = (json(out)['providers'] as Array<Record<string, unknown>>).map((p) => p['id']);
-    assert.deepEqual(providers, ['exa'], 'the file given with --config must win');
+    assert.equal(providers[0], 'exa', 'the declared entry keeps its place');
+    const expectedMerged = DEFAULT_ORDER.filter((id) => id !== 'exa').sort();
+    assert.deepEqual([...providers.slice(1)].sort(), expectedMerged, 'undeclared adapters are merged with their own defaults');
   } finally {
     box.cleanup();
   }

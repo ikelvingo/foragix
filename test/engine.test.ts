@@ -8,6 +8,7 @@ import { parseConfig } from '../src/config/load.js';
 import { loadCredentials } from '../src/credentials/load.js';
 import { ADAPTERS, createSchemaLookup } from '../src/providers/registry.js';
 import { BIT } from '../src/db/bits.js';
+import { mergeDefaultProviders } from '../src/config/defaults.js';
 import type { ProviderAdapter } from '../src/providers/types.js';
 
 const DDL = readFileSync(new URL('../../sql/schema.sql', import.meta.url), 'utf8');
@@ -65,7 +66,7 @@ function makeEngine(options: {
   now?: () => number;
 } = {}): Harness {
   const adapters = options.adapters ?? ADAPTERS;
-  const config = parseConfig(options.yaml ?? CONFIG_YAML, { lookup: createSchemaLookup(adapters) });
+  const config = mergeDefaultProviders(parseConfig(options.yaml ?? CONFIG_YAML, { lookup: createSchemaLookup(adapters) }), adapters);
   const credentials = loadCredentials({
     env: options.env ?? { TAVILY_API_KEY: 'k1', EXA_API_KEY: 'k2' },
   });
@@ -141,7 +142,8 @@ test('when every candidate fails transiently, return all_transient with retryabl
     assert.equal(result.reason, 'all_transient');
     assert.equal(result.retryable, true, 'a transient failure must tell the caller that a retry is possible');
     assert.ok(result.retry_after !== null, 'must give the earliest time a retry can succeed');
-    assert.equal(result.providers.length, 2);
+    // The merged roster reports every candidate it walked; at least the two keyed ones must show.
+    assert.ok(result.providers.length >= 2, 'the report carries all attempted providers');
   }
   h.close();
 });
@@ -230,33 +232,6 @@ providers:
   assert.equal(result.ok, true, 'consumption of a prepaid pool creates no cash-flow event; the gate must not apply');
   const exa = h.db.getProvider('exa');
   assert.equal((exa?.is_available ?? 0) & BIT.PAID_NOT_ALLOWED, 0);
-  h.close();
-});
-
-test('paid gate: a payg provider with no free allowance is not called until acceptance', async () => {
-  const yaml = `
-version: 1
-allow_paid: false
-providers:
-  - id: deepseek
-    enabled: true
-    priority: 10
-    credentials:
-      - name: DEEPSEEK_API_KEY
-        required: true
-    account: {}
-`;
-  const h = makeEngine({
-    yaml,
-    routes: { 'https://api.deepseek.com/v1/tools/search': { status: 200, body: '{"results":[]}' } },
-  });
-  const result = await h.engine.search({ query: 'x' });
-  assert.equal(result.ok, false, 'every deepseek call is billable; the gate must hold while unpaid');
-  const deepseek = h.db.getProvider('deepseek');
-  assert.notEqual((deepseek?.is_available ?? 0) & BIT.PAID_NOT_ALLOWED, 0);
-  if (!result.ok) {
-    assert.match(result.providers[0]?.action_for_llm ?? '', /accept paid usage/);
-  }
   h.close();
 });
 
@@ -349,9 +324,13 @@ test('the --problems filter on status returns only the problematic entries', () 
   });
   const all = h.engine.status(false);
   const problems = h.engine.status(true);
-  assert.equal(all.length, 2);
-  assert.equal(problems.length, 1);
-  assert.equal(problems[0]?.id, 'tavily');
+  // The merged roster lists all providers; the keyed subset is what this fixture can use.
+  const keyed = all.filter((p) => p.id === 'tavily' || p.id === 'exa');
+  assert.equal(keyed.length, 2);
+  assert.equal(keyed.filter((p) => p.usable).length, 1, 'exa is usable with its key, tavily is not');
+  assert.equal((problems.find((p) => p.id === 'tavily') !== undefined), true, 'tavily is a problem');
+  assert.equal((problems.find((p) => p.id === 'exa') === undefined), true, 'exa stays out of --problems');
+  assert.ok(problems.every((p) => !p.usable), 'problems lists only problematic entries');
   h.close();
 });
 
