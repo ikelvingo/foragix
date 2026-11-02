@@ -11,7 +11,10 @@ export const BIT = {
   QUOTA_DAY: 1 << 0,
   /** Monthly quota exhausted */
   QUOTA_MONTH: 1 << 1,
-  /** Credential missing (the declared environment variable does not exist or is empty) */
+  /**
+   * [LEGACY] Credential missing — retired: derivable at read time from the config×credentials
+   * pair. The constant stays only so old DB files decode and are migrated; never set by new code.
+   */
   CREDENTIAL_MISSING: 1 << 2,
   /** Credential rejected (provider 401, or the authentication semantics of 403) */
   CREDENTIAL_REJECTED: 1 << 3,
@@ -19,7 +22,10 @@ export const BIT = {
   TRANSIENT: 1 << 4,
   /** 429 rate limiting that clearly belongs to a short window — transient */
   RATE_LIMITED_SHORT: 1 << 5,
-  /** This provider may incur charges while the user has not accepted paid usage — persistent */
+  /**
+   * [LEGACY] The retired paid gate. Constants remain so old DB files decode and are migrated;
+   * never set by new code.
+   */
   PAID_NOT_ALLOWED: 1 << 6,
   /**
    * Quota exhausted with **no determinable reset period** (the adapter declares quotaPeriod =
@@ -44,13 +50,13 @@ export const PERSISTENT_BIT_MASK =
   BIT.QUOTA_DAY |
   BIT.QUOTA_MONTH |
   BIT.QUOTA_UNKNOWN |
-  BIT.CREDENTIAL_MISSING |
-  BIT.CREDENTIAL_REJECTED |
-  BIT.PAID_NOT_ALLOWED;
+  BIT.CREDENTIAL_REJECTED;
+
+/** Legacy slots (old DB files may carry them; migrated unconditionally at refresh). */
+export const LEGACY_BIT_MASK = BIT.CREDENTIAL_MISSING | BIT.PAID_NOT_ALLOWED;
 
 /** Bits that a period boundary **must not** clear */
-export const PERIOD_IRRELEVANT_BIT_MASK =
-  BIT.QUOTA_UNKNOWN | BIT.CREDENTIAL_MISSING | BIT.CREDENTIAL_REJECTED | BIT.PAID_NOT_ALLOWED;
+export const PERIOD_IRRELEVANT_BIT_MASK = BIT.QUOTA_UNKNOWN | BIT.CREDENTIAL_REJECTED;
 
 /** Reason labels presented externally by the state machine; used for structured rejection and the status tool, not involved in decisions. */
 export type Reason =

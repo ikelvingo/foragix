@@ -35,9 +35,12 @@ test('isKnownMask rejects undefined bits and non-integers', () => {
   assert.equal(isKnownMask(1.5), false);
 });
 
-test('the period-irrelevant mask still covers the credential bits (PAID is retired)', () => {
-  for (const bit of [BIT.CREDENTIAL_MISSING, BIT.CREDENTIAL_REJECTED]) {
+test('the period-irrelevant mask is reduced to schema-relevant bits after retirements', () => {
+  for (const bit of [BIT.QUOTA_UNKNOWN, BIT.CREDENTIAL_REJECTED]) {
     assert.ok((PERIOD_IRRELEVANT_BIT_MASK & bit) !== 0, `bit ${bit} should be a period-irrelevant bit`);
+  }
+  for (const bit of [BIT.CREDENTIAL_MISSING, BIT.PAID_NOT_ALLOWED]) {
+    assert.equal(PERIOD_IRRELEVANT_BIT_MASK & bit, 0, `legacy bit ${bit} left the mask`);
   }
   // Quota bits are not among them — they are exactly what a period boundary is meant to clear
   assert.equal((PERIOD_IRRELEVANT_BIT_MASK & BIT.QUOTA_DAY), 0);

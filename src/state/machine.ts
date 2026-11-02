@@ -6,7 +6,7 @@
  * recover when `retry_after` expires. All resets are lazy — decided before each call, no timer.
  */
 import type { SqliteAdapter } from '../db/sqlite.js';
-import { BIT, decodeReasons, type Reason } from '../db/bits.js';
+import { BIT, LEGACY_BIT_MASK, decodeReasons, type Reason } from '../db/bits.js';
 import { DEFAULT_TIMEZONE, periodKeys } from '../db/period.js';
 
 export interface ResetContext {
@@ -16,7 +16,7 @@ export interface ResetContext {
   credentialsPresent: boolean;
   /** Credential fingerprint; null means it cannot be computed (credentials incomplete). */
   credentialFingerprint: string | null;
-  /** Effective allow_paid (the value after provider-level override). */
+  /** Legacy plumbing; the paid gate is retired and this value no longer alters any behavior. */
   allowPaid: boolean;
 }
 
@@ -34,7 +34,7 @@ export interface ResetOutcome {
  *
  * Clearing rules: day/month boundary → QUOTA_DAY / QUOTA_MONTH (day and month are independent and
  * the first init never counts as a boundary); `retry_after` reached → TRANSIENT | RATE_LIMITED_SHORT;
- * credentials present → CREDENTIAL_MISSING; legacy PAID bits are cleared at refresh; credential fingerprint
+ * legacy slots (credential-missing/paid) are migrated unconditionally; credential fingerprint
  * changed → CREDENTIAL_REJECTED (presence alone is not enough, and a change only permits a retry).
  */
 export function applyResets(adapter: SqliteAdapter, providerId: string, ctx: ResetContext): ResetOutcome {
@@ -85,10 +85,12 @@ export function applyResets(adapter: SqliteAdapter, providerId: string, ctx: Res
     }
   }
 
-  // 4) Credentials present → clear "credentials missing"
-  if (ctx.credentialsPresent && (row.is_available & BIT.CREDENTIAL_MISSING) !== 0) {
-    adapter.clearBits(providerId, BIT.CREDENTIAL_MISSING);
-    adapter.log({ providerId, at: ctx.now, kind: 'bit_clear', detail: 'credentials present' });
+  // 4) Legacy slots (old files) are migrated unconditionally: the credential-missing bit is
+  //    derivable at read time and the paid gate is retired; no gate re-sets either.
+  const legacy = row.is_available & LEGACY_BIT_MASK;
+  if (legacy !== 0) {
+    adapter.clearBits(providerId, LEGACY_BIT_MASK);
+    adapter.log({ providerId, at: ctx.now, kind: 'bit_clear', detail: `legacy state cleaned (${legacy})` });
   }
 
   // 5) Credential fingerprint changed → clear "credential rejected". Presence alone does not
@@ -106,13 +108,6 @@ export function applyResets(adapter: SqliteAdapter, providerId: string, ctx: Res
     }
   }
 
-  // 6) The paid-gate concept is retired: the old bit from state written by previous versions
-  //    is removed unconditionally at refresh time (there is no gate left to re-set it).
-  if ((row.is_available & BIT.PAID_NOT_ALLOWED) !== 0) {
-    adapter.clearBits(providerId, BIT.PAID_NOT_ALLOWED);
-    adapter.log({ providerId, at: ctx.now, kind: 'bit_clear', detail: 'paid gate retired' });
-  }
-
   const after = adapter.getProvider(providerId);
   return {
     periodResets,
@@ -121,24 +116,3 @@ export function applyResets(adapter: SqliteAdapter, providerId: string, ctx: Res
   };
 }
 
-export interface CredentialGateContext {
-  now: number;
-  /** Whether all required credentials for this provider are present. */
-  credentialsPresent: boolean;
-}
-
-/**
- * Set the credentials-missing bit; `applyResets` clears it once credentials appear.
- * Must run before routing, otherwise a credential-less provider would be called with an empty key.
- */
-export function syncCredentialGate(adapter: SqliteAdapter, providerId: string, ctx: CredentialGateContext): void {
-  adapter.ensureProvider(providerId);
-  if (ctx.credentialsPresent) return; // recovery is handled by applyResets
-
-  const row = adapter.getProvider(providerId);
-  if (row === null) return;
-  if ((row.is_available & BIT.CREDENTIAL_MISSING) !== 0) return;
-
-  adapter.setBits(providerId, BIT.CREDENTIAL_MISSING);
-  adapter.log({ providerId, at: ctx.now, kind: 'bit_set', detail: 'credential_missing' });
-}

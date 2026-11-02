@@ -182,7 +182,7 @@ test('credential missing coexists with quota exhausted in the bitmask, each unaf
   db.close();
 });
 
-test('a period boundary does not clear the credential bits or the paid-gate bit', () => {
+test('legacy credential/paid slots are migrated on the next refresh, boundary or not', () => {
   const clock = { now: Date.UTC(2026, 9, 29, 12) };
   const db = openDb(clock);
   applyResets(db, 'p1', ctx(clock));
@@ -193,8 +193,8 @@ test('a period boundary does not clear the credential bits or the paid-gate bit'
 
   const mask = db.getProvider('p1')?.is_available ?? 0;
   assert.equal(mask & BIT.QUOTA_DAY, 0, 'the quota bit should be cleared by the period boundary');
-  assert.notEqual(mask & BIT.CREDENTIAL_MISSING, 0, 'the credential bit must not be cleared by the period boundary');
-  assert.equal(mask & BIT.PAID_NOT_ALLOWED, 0, 'the retired paid bit is removed at refresh');
+  assert.equal(mask & BIT.CREDENTIAL_MISSING, 0, 'the retired credential slot is migrated away');
+  assert.equal(mask & BIT.PAID_NOT_ALLOWED, 0, 'the retired paid slot is migrated away');
   db.close();
 });
 

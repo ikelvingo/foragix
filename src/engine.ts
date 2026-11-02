@@ -11,7 +11,7 @@
 import type { SqliteAdapter, ProviderRow } from './db/sqlite.js';
 import { BIT, decodeReasons, type Reason } from './db/bits.js';
 import { dayKey, isValidTimezone, monthKey, DEFAULT_TIMEZONE } from './db/period.js';
-import { applyResets, syncCredentialGate } from './state/machine.js';
+import { applyResets } from './state/machine.js';
 import { planSelection, type Candidate } from './routing/select.js';
 import { effectiveAllowPaid } from './config/load.js';
 import type { Config, IsolatedProvider, ProviderConfig } from './config/types.js';
@@ -118,8 +118,7 @@ export class Engine {
           this.deps.db.ensureProvider(provider.id);
           this.deps.db.setIsEnable(provider.id, provider.enabled);
           this.reseedIfStale(provider, adapter);
-          this.syncGates(provider, adapter);
-          this.applyResetsFor(provider, adapter);
+            this.applyResetsFor(provider, adapter);
         });
       } catch (err) {
         // Load-phase failure: do not throw, isolate this provider. The remaining providers must still be usable.
@@ -200,15 +199,6 @@ export class Engine {
   // Gates and resets
   // ---------------------------------------------------------------------------
 
-  /** Sync the credential gate. Must run before routing. */
-  private syncGates(provider: ProviderConfig, adapter: ProviderAdapter): void {
-    const now = this.deps.now();
-    const required = provider.credentials.filter((c) => c.required).map((c) => c.name);
-    const credentialsPresent = required.every((name) => this.deps.credentials.has(name));
-
-    syncCredentialGate(this.deps.db, provider.id, { now, credentialsPresent });
-  }
-
 
   /** Perform a lazy reset for a single provider (period boundary, cooldown expiry, credential change, paid gate). */
   private applyResetsFor(provider: ProviderConfig, adapter: ProviderAdapter): void {
@@ -243,8 +233,7 @@ export class Engine {
       if (adapter === undefined) continue;
       try {
         this.deps.db.transaction(() => {
-          this.syncGates(provider, adapter);
-          this.applyResetsFor(provider, adapter);
+            this.applyResetsFor(provider, adapter);
         });
       } catch (err) {
         failed.add(provider.id);
@@ -267,6 +256,12 @@ export class Engine {
       if (adapter === undefined) continue;
       const row = this.deps.db.getProvider(provider.id);
       if (row === null) continue;
+      // The legacy credential-missing bit is retired: presence is derived here, at routing
+      // read time, from the same config×credentials pair the adapters would consult.
+      const allRequiredPresent = provider.credentials
+        .filter((c) => c.required)
+        .every((c) => this.deps.credentials.has(c.name));
+      if (!allRequiredPresent) continue;
       out.push({
         providerId: provider.id,
         priority: provider.priority,
@@ -619,6 +614,12 @@ export class Engine {
     const state = decodeReasons(row.is_available);
     const required = provider.credentials.filter((c) => c.required).map((c) => c.name);
     const missing_env = required.filter((name) => !this.deps.credentials.has(name));
+    // Derived credential-missing label occupies the retired bit's snapshot position so the
+    // status contract stays stable for callers.
+    if (missing_env.length > 0 && !state.includes('credential_missing')) {
+      const at = state.findIndex((r) => r === 'quota_exhausted_unknown' || r === 'credential_rejected' || r === 'transient_failure');
+      state.splice(at === -1 ? state.length : at, 0, 'credential_missing');
+    }
     const init = adapter.init(provider.account);
     const needs_migration = row.needs_migration === 1;
     const disabledReason = this.disabled.get(provider.id) ?? null;
@@ -639,7 +640,11 @@ export class Engine {
       resets_at = nextPeriodBoundary(period, row.reset_timezone ?? DEFAULT_TIMEZONE, this.deps.now());
     }
 
-    const usable = !needs_migration && disabledReason === null && row.is_enable === 1 && row.is_available === 0;
+    // Usability mirrors routing: the legacy credential bit is retired, so the derived
+    // config×credentials predicate joins the availability check here as well.
+    const credentialReady = missing_env.length === 0;
+    const usable = !needs_migration && disabledReason === null && row.is_enable === 1
+      && credentialReady && row.is_available === 0;
 
     return {
       id: provider.id,
