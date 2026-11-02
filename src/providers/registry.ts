@@ -18,6 +18,11 @@ import { youAdapter } from './you/index.js';
 import { tinyfishAdapter } from './tinyfish/index.js';
 import { baiduAdapter } from './baidu/index.js';
 import { zhipuAdapter } from './zhipu/index.js';
+import { linkupAdapter } from './linkup/index.js';
+import { metasoAdapter } from './metaso/index.js';
+import { ollamaAdapter } from './ollama/index.js';
+import { zhihuAdapter } from './zhihu/index.js';
+import { doubaoAdapter } from './doubao/index.js';
 
 export const ADAPTERS: readonly ProviderAdapter[] = [
   tavilyAdapter,
@@ -32,18 +37,19 @@ export const ADAPTERS: readonly ProviderAdapter[] = [
   tinyfishAdapter,
   baiduAdapter,
   zhipuAdapter,
+  linkupAdapter,
+  metasoAdapter,
+  ollamaAdapter,
+  zhihuAdapter,
+  doubaoAdapter,
 ];
 
 /**
- * Providers that are verified but not yet implemented, or whose shape is not yet verified.
- * Each reason is the only record of why that provider is absent.
- *
- * Assessed against vendor documentation on 2026-11-02 (see documents/providers/).
- * Entries saying "unconfirmed" are open questions, not verified facts.
+ * The rosters that were assessed but carry no adapter today. Currently empty: every vendor
+ * in the PRD/service lists either has an adapter or was withdrawn from scope for a fact
+ * recorded in documents/providers/ (see the 2026-11-02 douvao withdrawal note there).
  */
-export const NOT_IMPLEMENTED: ReadonlyArray<{ id: string; reason: string }> = [
-  { id: 'doubao', reason: 'not implementable as standalone search REST: only Ark chat-completions tool-call, AgentKit skills and MCP surfaces exist for web search; a standalone key-auth search REST is not publicly documented (volume/AgentKit surfaces are usable but outside this REST contract)' },
-];
+export const NOT_IMPLEMENTED: ReadonlyArray<{ id: string; reason: string }> = [];
 
 const BY_ID = new Map<string, ProviderAdapter>(ADAPTERS.map((a) => [a.id, a]));
 

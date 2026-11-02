@@ -94,20 +94,20 @@ function runCapability(
 // Baidu
 // ---------------------------------------------------------------------------
 
-test('baidu search POSTs to the qianfan gateway with count mapping', async () => {
+test('baidu search POSTs the verified messages body to the qianfan gateway', async () => {
   const calls: CapturedCall[] = [];
   const ctx = makeContext(calls, [
-    { status: 200, body: { webPages: { value: [{ title: 'T', url: 'https://b', summary: 'S' }] } } },
+    { status: 200, body: { request_id: 'r1', references: [{ id: 1, url: 'https://b', title: 'T', content: 'C', date: '2026-10-29' }] } },
   ]);
   const outcome = await runCapability(baiduAdapter, 'search', ctx, { query: 'q', maxResults: 55 });
   assert.equal(outcome.ok, true);
   if (outcome.ok) {
-    assert.deepEqual(outcome.data, [{ title: 'T', url: 'https://b', snippet: 'S' }]);
+    assert.deepEqual(outcome.data, [{ title: 'T', url: 'https://b', snippet: 'C' }]);
     assert.equal(outcome.usage, 1);
   }
   assert.equal(calls[0]!.url, 'https://qianfan.baidubce.com/v2/ai_search');
   assert.equal(calls[0]!.headers.authorization, 'Bearer fake-value-for-BAIDU_API_KEY');
-  assert.deepEqual(JSON.parse(calls[0]!.body ?? '{}'), { query: 'q', count: 50 });
+  assert.deepEqual(JSON.parse(calls[0]!.body ?? '{}'), { messages: [{ role: 'user', content: 'q' }] });
 });
 
 test('baidu refuses loudly on an unrecognized 200 shape instead of failing silently', async () => {
@@ -194,7 +194,7 @@ test('zhipu fetch maps the reader_result document', async () => {
 
 test('zhipu verified error codes: auth and in-band quota cap', async () => {
   assert.deepEqual(zhipuAdapter.errorHints?.authErrorCodes, ['1000', '1001', '1003', '1005']);
-  assert.deepEqual(zhipuAdapter.errorHints?.quotaErrorCodes, ['1308']);
+  assert.deepEqual(zhipuAdapter.errorHints?.quotaErrorCodes, ['1308', '1113']);
   const calls: CapturedCall[] = [];
   const ctx = makeContext(calls, [{ status: 401, body: { code: 1001, message: 'auth missing' } }]);
   const outcome = await runCapability(zhipuAdapter, 'search', ctx, { query: 'q' });

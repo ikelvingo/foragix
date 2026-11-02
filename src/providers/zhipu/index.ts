@@ -56,7 +56,9 @@ export const zhipuAdapter: ProviderAdapter = {
     // Verified: these business codes are the auth failures of this platform (HTTP 401 family).
     authErrorCodes: ['1000', '1001', '1003', '1005'],
     // Verified: an in-band quota cap (message carries the reset time) — a quota event.
-    quotaErrorCodes: ['1308'],
+    // Verified: these business codes are quota/balance semantics of this platform — the
+    // in-band cap (carries a reset time) and the arrears state (1113, live-verified 2026-11-02).
+    quotaErrorCodes: ['1308', '1113'],
   },
 
   init(_account): ProviderInit {

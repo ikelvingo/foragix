@@ -8,10 +8,12 @@
  *
  *  - Search-only: `POST https://qianfan.baidubce.com/v2/ai_search` Bearer-auth; the
  *    chat/completions variant (answer synthesis) is out of scope for result retrieval.
- *  - Body: `{query, count}` (count = `maxResults`, clamped 1–50).
- *  - Response shape family: `webPages.value[]` with `title`/`url`/`summary` — treated as
- *    indicative; a 200 that matches none of the known shapes fails loudly ("our problem")
- *    instead of silently reporting an empty success.
+ *  - Body (verified): `{"messages":[{"role":"user","content":"<query>"}]}` — the older `{query, count}`
+ *    shape is rejected live with "empty messages". The 100/day quota belongs to this AI Search
+ *    service; a second plain-search product with a separate 50/day allowance is out of scope.
+ *  - Response shape (live-verified 2026-11-02): `{request_id, references[]}` with `id`/`url`/`title`/
+ *    `content`/`date`; a 200 outside it fails loudly ("our problem") instead of silently
+ *    reporting an empty success.
  *  - Quota: 100 free calls/day, then usage-based billing — `canCharge` true, the paid gate
  *    applies by default. Daily reset assumed at Beijing time (documented gap).
  *  - Qianfan v2 failures carry `{error_code, error_msg}` on 2xx responses; when the envelope
@@ -27,16 +29,19 @@ const CREDENTIAL = 'BAIDU_API_KEY';
 const ENDPOINT_SEARCH = 'https://qianfan.baidubce.com/v2/ai_search';
 const MAX_COUNT = 50;
 
-interface BaiduItem {
-  title?: string;
+interface BaiduReference {
+  id?: number;
   url?: string;
-  summary?: string;
+  title?: string;
+  content?: string;
+  date?: string;
 }
 
 interface BaiduSearchResponse {
   error_code?: number;
   error_msg?: string;
-  webPages?: { value?: BaiduItem[] };
+  request_id?: string;
+  references?: Array<BaiduReference>;
 }
 
 function authHeaders(ctx: AdapterContext): Record<string, string> {
@@ -74,14 +79,13 @@ export const baiduAdapter: ProviderAdapter = {
   },
 
   async search(ctx, req): Promise<AdapterOutcome<SearchHit[]>> {
-    const count = req.maxResults === undefined ? undefined : Math.min(MAX_COUNT, Math.max(1, req.maxResults));
+    // Live-probe contract (2026-11-02): the plain {"query"} body is rejected with
+    // InvalidArgument "empty messages" — the working body is {"messages":[{role, content}]},
+    // answered with {request_id, references[].count is not part of the verified shape.
     const result = await request(ctx.fetchImpl, ENDPOINT_SEARCH, {
       method: 'POST',
       headers: authHeaders(ctx),
-      json: {
-        query: req.query,
-        ...(count === undefined ? {} : { count }),
-      },
+      json: { messages: [{ role: 'user', content: req.query }] },
     });
     if (!result.ok) return result;
 
@@ -113,25 +117,25 @@ export const baiduAdapter: ProviderAdapter = {
       };
     }
 
-    const items = parsed.webPages?.value;
-    if (!Array.isArray(items)) {
-      // The response shape is the provider's weakest evidence; refuse loudly rather than
-      // silently reporting an empty success against an unrecognized shape.
+    const refs = parsed.references;
+    if (!Array.isArray(refs)) {
+      // The response shape is live-verified; a 200 outside it is refused loudly.
       return {
         ok: false,
         classification: {
           kind: 'our_problem',
-          evidence: 'baidu search response does not match the documented webPages.value shape',
+          evidence: 'baidu search response does not match the verified references[] shape',
         },
       };
     }
 
-    const hits: SearchHit[] = items
-      .filter((r): r is BaiduItem => typeof r?.url === 'string')
+    const hits: SearchHit[] = refs
+      .filter((r): r is BaiduReference & { url: string } => typeof r?.url === 'string')
       .map((r) => ({
         title: r.title ?? '',
-        url: r.url as string,
-        ...(typeof r.summary === 'string' ? { snippet: r.summary } : {}),
+        url: r.url,
+        // `content` is the sourced extracts; `date` carries the publish timestamp when present.
+        ...(typeof r.content === 'string' && r.content !== '' ? { snippet: r.content } : typeof r.date === 'string' ? { snippet: r.date } : {}),
       }));
 
     return { ok: true, data: hits, usage: this.usageOf?.('search', ctx.config.account) ?? 1 };

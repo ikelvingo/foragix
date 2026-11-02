@@ -518,7 +518,7 @@ test('no config anywhere runs on the built-in defaults', async () => {
     const out = await run(['status'], { sandbox: box, env: { HOME: box.dir, TAVILY_API_KEY: '' } });
     assert.equal(out.code, EXIT_OK, 'the first run needs no config file');
     const providers = (json(out)['providers'] as Array<Record<string, unknown>>).map((p) => p['id']);
-    assert.deepEqual(providers, ['tavily', 'exa', 'brave', 'minimax', 'firecrawl', 'deepseek', 'anysearch', 'searxng', 'you', 'tinyfish', 'baidu', 'zhipu'], 'every implemented adapter is enabled by default');
+    assert.deepEqual(providers, ['tavily', 'exa', 'brave', 'minimax', 'firecrawl', 'deepseek', 'anysearch', 'searxng', 'you', 'tinyfish', 'baidu', 'zhipu', 'linkup', 'metaso', 'ollama', 'zhihu', 'doubao'], 'every implemented adapter is enabled by default');
   } finally {
     box.cleanup();
   }
