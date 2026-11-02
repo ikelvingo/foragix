@@ -151,8 +151,8 @@ export class Engine {
     // credentials sees 'none'; treating 'none' ↔ a real key as a change would brick the provider
     // for good the first time it boots unauthenticated. Only a real key switching to a different
     // real key is a billing-pool change.
-    const oldFingerprint = row.pool_id === null ? 'none' : (row.pool_id.split('|')[2] ?? 'none');
-    const newFingerprint = poolId.split('|')[2] ?? 'none';
+    const oldFingerprint = row.pool_id === null ? 'none' : (row.pool_id.split('|')[1] ?? 'none');
+    const newFingerprint = poolId.split('|')[1] ?? 'none';
     const poolChanged =
       row.pool_id !== null && row.pool_id !== poolId && oldFingerprint !== 'none' && newFingerprint !== 'none';
     if (!versionChanged && !accountChanged && !poolChanged) return;
@@ -779,10 +779,16 @@ function digestOf(account: Readonly<Record<string, unknown>>): string {
  * `needs_migration` must be set rather than continuing to accumulate.
  * Contains hashes only, never any credential content.
  */
+/**
+ * Billing-pool identity = the credential fingerprint ONLY (the memo the field comment always
+ * claimed). Account fields — region switches like `base_url`, `capped_free`, tier flags — are
+ * accounted for by the accountDigest reseed path (writeStatic) and must NOT brick automatic
+ * use through `needs_migration`: they never change what a unit means.
+ */
 function poolIdOf(provider: ProviderConfig, adapter: ProviderAdapter, credentials: CredentialView): string {
   const required = provider.credentials.filter((c) => c.required).map((c) => c.name);
   const fingerprint = credentials.fingerprint(required) ?? 'none';
-  return `${adapter.id}|${digestOf(provider.account)}|${fingerprint}`;
+  return `${adapter.id}|${fingerprint}`;
 }
 
 /**
