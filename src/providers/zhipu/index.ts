@@ -62,14 +62,14 @@ function baseUrl(ctx: AdapterContext, fallback: string): string {
   return fallback;
 }
 
-export function zhipuAdapterFor(id: 'zhipu' | 'zhipu_ai', opts: { defaultBaseUrl: string; defaultEngine: 'search_std' | 'search-prime' }): ProviderAdapter {
+export function zhipuAdapterFor(id: 'zhipu' | 'zhipu_cn', opts: { defaultBaseUrl: string; defaultEngine: 'search_std' | 'search-prime' }): ProviderAdapter {
   return zhipuAdapterForRegion(id, opts.defaultBaseUrl, opts.defaultEngine);
 }
 
-function zhipuAdapterForRegion(id: 'zhipu' | 'zhipu_ai', defaultHost: string, defaultEngine: string): ProviderAdapter {
+function zhipuAdapterForRegion(id: 'zhipu' | 'zhipu_cn', defaultHost: string, defaultEngine: string): ProviderAdapter {
   // Four base urls → four credential variables; z.ai keys are minted on the z.ai console and
   // are NOT interchangeable with bigmodel.cn keys (region-split review ruling).
-  const credentialName = id === 'zhipu' ? 'ZHIPU_API_KEY' : 'ZAI_API_KEY';
+  const credentialName = id === 'zhipu' ? 'ZAI_API_KEY' : 'ZHIPU_API_KEY';
 
   return {
     id,
@@ -203,5 +203,5 @@ function zhipuAdapterForRegion(id: 'zhipu' | 'zhipu_ai', defaultHost: string, de
   },
 };
 };
-export const zhipuAdapter = zhipuAdapterFor('zhipu', { defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultEngine: 'search_std' });
-export const zhipuAiAdapter = zhipuAdapterFor('zhipu_ai', { defaultBaseUrl: 'https://api.z.ai/api/paas/v4', defaultEngine: 'search-prime' });
+export const zhipuAdapter = zhipuAdapterFor('zhipu', { defaultBaseUrl: 'https://api.z.ai/api/paas/v4', defaultEngine: 'search-prime' });
+export const zhipuCnAdapter = zhipuAdapterFor('zhipu_cn', { defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultEngine: 'search_std' });

@@ -40,7 +40,7 @@ import { baiduAdapter } from './baidu/index.js';
 import { deepseekAdapter } from './deepseek/index.js';
 
 import { zhipuAdapter } from './zhipu/index.js';
-import { zhipuAiAdapter } from './zhipu/index.js';
+import { zhipuCnAdapter } from './zhipu/index.js';
 
 export const ADAPTERS: readonly ProviderAdapter[] = [
   searxngAdapter,
@@ -60,8 +60,8 @@ export const ADAPTERS: readonly ProviderAdapter[] = [
   doubaoAdapter,
   baiduAdapter,
   deepseekAdapter,
+  zhipuCnAdapter,
   zhipuAdapter,
-  zhipuAiAdapter,
 ];
 
 /**

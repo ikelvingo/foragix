@@ -6,7 +6,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AdapterContext, AdapterOutcome, FetchDocument, ProviderAdapter, SearchHit } from '../src/providers/types.js';
 import { baiduAdapter } from '../src/providers/baidu/index.js';
-import { zhipuAdapter } from '../src/providers/zhipu/index.js';
+import { zhipuCnAdapter } from '../src/providers/zhipu/index.js';
+const zhipuAdapter = zhipuCnAdapter;
 import type { CredentialPresence } from '../src/credentials/load.js';
 
 const CREDENTIALS: AdapterContext['credentials'] = {

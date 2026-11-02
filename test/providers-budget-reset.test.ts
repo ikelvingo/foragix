@@ -15,7 +15,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEngine } from './engine.test.js';
 import { BIT } from '../src/db/bits.js';
-import { zhipuAdapter } from '../src/providers/zhipu/index.js';
+import { zhipuCnAdapter } from '../src/providers/zhipu/index.js';
+const zhipuAdapter = zhipuCnAdapter;
 import { minimaxCnAdapter } from '../src/providers/minimax/index.js';
 import { braveAdapter } from '../src/providers/brave/index.js';
 const braveAdapterForTests = braveAdapter;
@@ -119,7 +120,7 @@ test('minimax lane A: refusal probes the plan read once and persists the declare
   const second = await h.engine.search({ query: 'q' });
   assert.equal(second.ok, false);
   assert.notEqual((h.db.getProvider('minimax_cn')?.is_available ?? 0) & BIT.QUOTA_UNKNOWN, 0, 'still refusing without a declared live boundary');
-  assert.equal(h.db.readVendorReset('minimax'), null, 'no fabricated reset time is stored');
+  assert.equal(h.db.readVendorReset('minimax_cn'), null, 'no fabricated reset time is stored');
   h.close();
 });
 
@@ -127,7 +128,7 @@ test('zhipu lane A in-band: the 1308 message carries the reset time, zero extra 
   const clock = { now: t0 };
   const h = makeEngine({
     now: () => clock.now,
-    yaml: 'version: 1\nproviders:\n  - id: zhipu\n    enabled: true\n    credentials:\n      - name: ZHIPU_API_KEY\n        required: true\n    account: {}\n',
+    yaml: 'version: 1\nproviders:\n  - id: zhipu_cn\n    enabled: true\n    credentials:\n      - name: ZHIPU_API_KEY\n        required: true\n    account: {}\n',
     adapters: [zhipuAdapter],
     env: { ZHIPU_API_KEY: 'k-zp' },
     routes: {
@@ -140,6 +141,6 @@ test('zhipu lane A in-band: the 1308 message carries the reset time, zero extra 
 
   await h.engine.search({ query: 'q' });
   const expected = Date.parse('2026-11-04T02:00:00+08:00');
-  assert.equal(h.db.readVendorReset('zhipu'), expected, 'in-band boundary persisted without any probe request');
+  assert.equal(h.db.readVendorReset('zhipu_cn'), expected, 'in-band boundary persisted without any probe request');
   h.close();
 });
