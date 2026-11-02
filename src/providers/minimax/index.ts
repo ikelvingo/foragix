@@ -48,12 +48,17 @@ function baseUrl(ctx: AdapterContext): string {
   return DEFAULT_BASE_URL;
 }
 
-export const minimaxAdapter: ProviderAdapter = {
-  id: 'minimax',
+export function minimaxAdapterFor(id: 'minimax' | 'minimax_cn'): ProviderAdapter {
+  return minimaxAdapterForRegion(id);
+}
+
+function minimaxAdapterForRegion(id: 'minimax' | 'minimax_cn'): ProviderAdapter {
+  return {
+    id,
   capabilities: ['search'],
 
   schema: {
-    id: 'minimax',
+    id,
     requiresCredentials: true,
     // Consumption depends on an account-side subscription/prepaid setup the skill cannot
     // verify (minimax plan key, zhipu resource pack, deepseek per-call billing). Fresh
@@ -63,7 +68,7 @@ export const minimaxAdapter: ProviderAdapter = {
     accountOptions: {
       base_url: {
         type: 'string',
-        default: DEFAULT_BASE_URL,
+        default: id === 'minimax_cn' ? 'https://api.minimax.cn' : DEFAULT_BASE_URL,
         description: 'MiniMax REST host; cn-region accounts may use https://api.minimax.cn',
       },
     },
@@ -157,4 +162,7 @@ export const minimaxAdapter: ProviderAdapter = {
 
     return { ok: true, data: hits, usage: this.usageOf?.('search', ctx.config.account) ?? 1 };
   },
+  };
 };
+export const minimaxAdapter = minimaxAdapterFor('minimax');
+export const minimaxCnAdapter = minimaxAdapterFor('minimax_cn');

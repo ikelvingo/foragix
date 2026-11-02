@@ -9,6 +9,7 @@ import type { ProviderSchema, SchemaLookup } from '../config/types.js';
 import { searxngAdapter } from './searxng/index.js';
 
 import { minimaxAdapter } from './minimax/index.js';
+import { minimaxCnAdapter } from './minimax/index.js';
 
 import { tinyfishAdapter } from './tinyfish/index.js';
 
@@ -39,10 +40,12 @@ import { baiduAdapter } from './baidu/index.js';
 import { deepseekAdapter } from './deepseek/index.js';
 
 import { zhipuAdapter } from './zhipu/index.js';
+import { zhipuAiAdapter } from './zhipu/index.js';
 
 export const ADAPTERS: readonly ProviderAdapter[] = [
   searxngAdapter,
   minimaxAdapter,
+  minimaxCnAdapter,
   tinyfishAdapter,
   youAdapter,
   zhihuAdapter,
@@ -58,6 +61,7 @@ export const ADAPTERS: readonly ProviderAdapter[] = [
   baiduAdapter,
   deepseekAdapter,
   zhipuAdapter,
+  zhipuAiAdapter,
 ];
 
 /**

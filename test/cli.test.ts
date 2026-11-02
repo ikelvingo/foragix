@@ -28,7 +28,7 @@ providers:
 `;
 
 // Adjudicated default priority order (free-quota size first); mirrors the registry.
-const DEFAULT_ORDER = ['searxng', 'minimax', 'tinyfish', 'you', 'zhihu', 'anysearch', 'ollama', 'linkup', 'exa', 'metaso', 'firecrawl', 'tavily', 'brave', 'doubao', 'baidu', 'deepseek', 'zhipu'] as const;
+const DEFAULT_ORDER = ['searxng', 'minimax', 'minimax_cn', 'tinyfish', 'you', 'zhihu', 'anysearch', 'ollama', 'linkup', 'exa', 'metaso', 'firecrawl', 'tavily', 'brave', 'doubao', 'baidu', 'deepseek', 'zhipu', 'zhipu_ai'] as const;
 
 interface Sandbox {
   readonly dir: string;
@@ -112,7 +112,7 @@ test('status succeeds offline and reports the provider as unusable without crede
     const providers = body['providers'] as Array<Record<string, unknown>>;
     // The merge policy appends default entries for every adapter the fixture does not
     // declare, so the offline roster is the full registry.
-    assert.equal(providers.length, 17);
+    assert.equal(providers.length, 19);
     const tavily = providers.find((p) => p['id'] === 'tavily') as Record<string, unknown>;
     assert.equal(tavily['usable'], false);
     assert.deepEqual(tavily['state'], ['credential_missing']);
@@ -533,7 +533,7 @@ test('no config anywhere runs on the built-in defaults', async () => {
     const providers = (json(out)['providers'] as Array<Record<string, unknown>>).map((p) => p['id']);
     assert.deepEqual(providers, [...DEFAULT_ORDER], 'the default config follows the adjudicated free-quota priority order');
     const byId = new Map(providers.map((id) => [id, id]));
-    for (const sensitive of ['minimax', 'zhipu', 'deepseek']) {
+    for (const sensitive of ['minimax', 'minimax_cn', 'zhipu', 'zhipu_ai', 'deepseek']) {
       assert.ok(DEFAULT_ORDER.includes(sensitive as never), sensitive + ' is declared in the roster');
     }
     assert.ok(byId.size === DEFAULT_ORDER.length, 'each roster id is unique');

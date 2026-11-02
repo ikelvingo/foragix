@@ -23,7 +23,6 @@ import { interpret, parseJson, request } from '../http.js';
 import { classifyParseFailure } from '../../errors/classify.js';
 
 const CREDENTIAL = 'ZHIPU_API_KEY';
-const DEFAULT_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
 const MAX_COUNT = 50;
 const MAX_QUERY_CHARS = 70;
 
@@ -57,18 +56,23 @@ function declaredResetAt(body: string | undefined): number | undefined {
 }
 
 
-function baseUrl(ctx: AdapterContext): string {
+function baseUrl(ctx: AdapterContext, fallback: string): string {
   const raw = ctx.config.account['base_url'];
   if (typeof raw === 'string' && raw !== '') return raw.replace(/\/+$/, '');
-  return DEFAULT_BASE_URL;
+  return fallback;
 }
 
-export const zhipuAdapter: ProviderAdapter = {
-  id: 'zhipu',
-  capabilities: ['search', 'fetch'],
+export function zhipuAdapterFor(id: 'zhipu' | 'zhipu_ai', opts: { defaultBaseUrl: string; defaultEngine: 'search_std' | 'search-prime' }): ProviderAdapter {
+  return zhipuAdapterForRegion(id, opts.defaultBaseUrl, opts.defaultEngine);
+}
 
-  schema: {
-    id: 'zhipu',
+function zhipuAdapterForRegion(id: 'zhipu' | 'zhipu_ai', defaultHost: string, defaultEngine: string): ProviderAdapter {
+  return {
+    id,
+    capabilities: ['search', 'fetch'],
+
+    schema: {
+      id,
     requiresCredentials: true,
     // Consumption depends on an account-side subscription/prepaid setup the skill cannot
     // verify (minimax plan key, zhipu resource pack, deepseek per-call billing). Fresh
@@ -80,8 +84,8 @@ export const zhipuAdapter: ProviderAdapter = {
     accountOptions: {
       base_url: {
         type: 'string',
-        default: DEFAULT_BASE_URL,
-        description: 'Zhipu REST host; overseas z.ai accounts may use https://api.z.ai/api/paas/v4',
+        default: defaultHost,
+        description: 'Region switch; semantics identical, only the host and default engine differ',
       },
     },
   },
@@ -115,13 +119,13 @@ export const zhipuAdapter: ProviderAdapter = {
 
   async search(ctx, req): Promise<AdapterOutcome<SearchHit[]>> {
     const count = req.maxResults === undefined ? undefined : Math.min(MAX_COUNT, Math.max(1, req.maxResults));
-    const result = await request(ctx.fetchImpl, `${baseUrl(ctx)}/web_search`, {
+    const result = await request(ctx.fetchImpl, `${baseUrl(ctx, defaultHost)}/web_search`, {
       method: 'POST',
       headers: authHeaders(ctx),
       json: {
         // Hardcoded request shape: base engine, no intent pre-recognition (extra latency).
         search_query: req.query.slice(0, MAX_QUERY_CHARS),
-        search_engine: 'search_std',
+        search_engine: defaultEngine,
         search_intent: false,
         ...(count === undefined ? {} : { count }),
       },
@@ -152,7 +156,7 @@ export const zhipuAdapter: ProviderAdapter = {
   },
 
   async fetch(ctx, req): Promise<AdapterOutcome<FetchDocument>> {
-    const result = await request(ctx.fetchImpl, `${baseUrl(ctx)}/reader`, {
+    const result = await request(ctx.fetchImpl, `${baseUrl(ctx, defaultHost)}/reader`, {
       method: 'POST',
       headers: authHeaders(ctx),
       json: { url: req.url },
@@ -194,3 +198,6 @@ export const zhipuAdapter: ProviderAdapter = {
     };
   },
 };
+};
+export const zhipuAdapter = zhipuAdapterFor('zhipu', { defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultEngine: 'search_std' });
+export const zhipuAiAdapter = zhipuAdapterFor('zhipu_ai', { defaultBaseUrl: 'https://api.z.ai/api/paas/v4', defaultEngine: 'search-prime' });
