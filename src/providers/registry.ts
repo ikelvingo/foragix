@@ -14,6 +14,10 @@ import { firecrawlAdapter } from './firecrawl/index.js';
 import { deepseekAdapter } from './deepseek/index.js';
 import { anysearchAdapter } from './anysearch/index.js';
 import { searxngAdapter } from './searxng/index.js';
+import { youAdapter } from './you/index.js';
+import { tinyfishAdapter } from './tinyfish/index.js';
+import { baiduAdapter } from './baidu/index.js';
+import { zhipuAdapter } from './zhipu/index.js';
 
 export const ADAPTERS: readonly ProviderAdapter[] = [
   tavilyAdapter,
@@ -24,21 +28,21 @@ export const ADAPTERS: readonly ProviderAdapter[] = [
   deepseekAdapter,
   anysearchAdapter,
   searxngAdapter,
+  youAdapter,
+  tinyfishAdapter,
+  baiduAdapter,
+  zhipuAdapter,
 ];
 
 /**
  * Providers that are verified but not yet implemented, or whose shape is not yet verified.
  * Each reason is the only record of why that provider is absent.
  *
- * Assessed against vendor documentation on 2026-10-28. Entries saying "unconfirmed" or
- * "must be decided" are open questions, not verified facts; re-check before implementing.
+ * Assessed against vendor documentation on 2026-11-02 (see documents/providers/).
+ * Entries saying "unconfirmed" are open questions, not verified facts.
  */
 export const NOT_IMPLEMENTED: ReadonlyArray<{ id: string; reason: string }> = [
-  { id: 'you', reason: 'the free path is MCP rather than a standalone REST, which conflicts with "MCP-only does not count as supported"' },
-  { id: 'tinyfish', reason: 'Search and Fetch have different limits, and the short period is not modeled; quota attribution must be decided first' },
-  { id: 'baidu', reason: 'metered billing after the free quota, so the default stance of the paid gate must be decided first' },
-  { id: 'doubao', reason: 'standalone REST identity unconfirmed' },
-  { id: 'zhipu', reason: 'standalone REST endpoint unconfirmed, and it uses a dual 5-hour + weekly period' },
+  { id: 'doubao', reason: 'not implementable as standalone search REST: only Ark chat-completions tool-call, AgentKit skills and MCP surfaces exist for web search; a standalone key-auth search REST is not publicly documented (volume/AgentKit surfaces are usable but outside this REST contract)' },
 ];
 
 const BY_ID = new Map<string, ProviderAdapter>(ADAPTERS.map((a) => [a.id, a]));
