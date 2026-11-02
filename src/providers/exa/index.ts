@@ -65,6 +65,9 @@ export const exaAdapter: ProviderAdapter = {
       version: 1,
       // Auto-recharge default unverified → conservatively treated as chargeable.
       canCharge: true,
+      // Consumption of the monthly prepaid credit balance: spending it is no cash-flow event
+      // until a 402 (no verified auto-recharge) answers as plain quota exhaustion.
+      billingKind: 'included',
       // $10/month, resets on the first of the calendar month, unused balance does not accumulate.
       // The balance cannot be counted in requests, hence both limits are null.
       quotaPeriod: 'month',

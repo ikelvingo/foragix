@@ -63,6 +63,9 @@ export const tinyfishAdapter: ProviderAdapter = {
     return {
       version: 1,
       canCharge: true,
+      // Daily free allowance usable at $0; beyond it the zero wallet only answers 402 — no
+      // cash-flow event without a funded wallet, so the usage-based gate does not apply.
+      billingKind: 'included',
       quotaPeriod: 'day',
       // Per-capability daily allowances (12k search / 1k fetch) are not representable as
       // one provider-level limit, so local counting is disabled.

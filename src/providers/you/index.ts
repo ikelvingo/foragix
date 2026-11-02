@@ -70,6 +70,9 @@ export const youAdapter: ProviderAdapter = {
     return {
       version: 1,
       canCharge: true,
+      // Consumption of the prepaid credit balance ($100 sign-up credits, then PAYG only when
+      // topped up): no cash-flow event until a 402 answers as quota exhaustion.
+      billingKind: 'included',
       // Credit-based spend: no vendor reset window to track.
       quotaPeriod: 'none',
       dayLimit: null,
