@@ -209,7 +209,7 @@ test('a provider with missing credentials is skipped and no request is made', as
   db.close();
 });
 
-test('paid gate: while paid usage has not been accepted it is not called even with complete credentials', async () => {
+test('paid gate: prepaid-included consumption passes without acceptance (exa)', async () => {
   const yaml = `
 version: 1
 allow_paid: false
@@ -227,9 +227,33 @@ providers:
     routes: { 'https://api.exa.ai/search': { status: 200, body: EXA_SEARCH_OK } },
   });
   const result = await h.engine.search({ query: 'x' });
-  assert.equal(result.ok, false, 'exa must not be called while paid usage has not been accepted');
+  assert.equal(result.ok, true, 'consumption of a prepaid pool creates no cash-flow event; the gate must not apply');
   const exa = h.db.getProvider('exa');
-  assert.notEqual((exa?.is_available ?? 0) & BIT.PAID_NOT_ALLOWED, 0);
+  assert.equal((exa?.is_available ?? 0) & BIT.PAID_NOT_ALLOWED, 0);
+  h.close();
+});
+
+test('paid gate: a payg provider with no free allowance is not called until acceptance', async () => {
+  const yaml = `
+version: 1
+allow_paid: false
+providers:
+  - id: deepseek
+    enabled: true
+    priority: 10
+    credentials:
+      - name: DEEPSEEK_API_KEY
+        required: true
+    account: {}
+`;
+  const h = makeEngine({
+    yaml,
+    routes: { 'https://api.deepseek.com/v1/tools/search': { status: 200, body: '{"results":[]}' } },
+  });
+  const result = await h.engine.search({ query: 'x' });
+  assert.equal(result.ok, false, 'every deepseek call is billable; the gate must hold while unpaid');
+  const deepseek = h.db.getProvider('deepseek');
+  assert.notEqual((deepseek?.is_available ?? 0) & BIT.PAID_NOT_ALLOWED, 0);
   if (!result.ok) {
     assert.match(result.providers[0]?.action_for_llm ?? '', /accept paid usage/);
   }
