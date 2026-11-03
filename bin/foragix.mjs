@@ -2,8 +2,9 @@
 /**
  * Executable entry for the skill.
  *
- * The code lives in the compiled output `dist/`, shipped with the skill together with its one
- * runtime dependency. Running it needs nothing installed beyond Node itself.
+ * The code lives in the compiled output `dist/`; a copy installed from git without the
+ * single runtime dependency (`yaml`) self-heals it on the first run. Beyond that, nothing
+ * is needed beyond Node itself.
  */
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
