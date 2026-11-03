@@ -10,6 +10,7 @@ import { ADAPTERS, createSchemaLookup } from '../src/providers/registry.js';
 import { BIT } from '../src/db/bits.js';
 import { monthKey, DEFAULT_TIMEZONE } from '../src/db/period.js';
 import { mergeDefaultProviders } from '../src/config/defaults.js';
+import { readObserved } from '../src/state/usage.js';
 const DDL = readFileSync(new URL('../../sql/schema.sql', import.meta.url), 'utf8');
 /** Return a canned response by URL. Any URL that is not matched returns 500, so a test never silently depends on the real network. */
 function fakeFetch(routes) {
@@ -62,6 +63,185 @@ export function makeEngine(options = {}) {
     engine.bootstrap();
     return { engine, db, close: () => db.close() };
 }
+test('a Zhihu-restricted search never returns an unrelated domain', async () => {
+    const h = makeEngine({ routes: { 'https://api.tavily.com/search': { status: 200, body: TAVILY_SEARCH_OK } } });
+    try {
+        const result = await h.engine.search({ query: 'experience', site: 'zhihu' });
+        if (result.ok)
+            assert.ok(result.data.every((hit) => new URL(hit.url).hostname.endsWith('.zhihu.com') || new URL(hit.url).hostname === 'zhihu.com'));
+    }
+    finally {
+        h.close();
+    }
+});
+test('an explicit 百科 request routes to Baidu without extra flags', async () => {
+    const base = ADAPTERS.find((a) => a.id === 'baidu');
+    let called = 0;
+    const baidu = { ...base, information: async () => { called += 1; return { ok: true, usage: 1, data: { type: 'encyclopedia', source: 'baidu', data: {} } }; } };
+    const h = makeEngine({ yaml: 'version: 1\nproviders:\n  - id: baidu\n', adapters: [baidu], env: { BAIDU_API_KEY: 'a' } });
+    try {
+        const result = await h.engine.information({ query: '李白的百度百科词条' });
+        assert.equal(result.ok, true);
+        assert.equal(called, 1);
+    }
+    finally {
+        h.close();
+    }
+});
+test('Baidu encyclopedia calls are observed separately from Baidu search quota', async () => {
+    const base = ADAPTERS.find((a) => a.id === 'baidu');
+    const baidu = { ...base, information: async () => ({ ok: true, usage: 1, data: { type: 'encyclopedia', source: 'baidu', data: { lemma_title: 'x' } } }) };
+    const h = makeEngine({ yaml: 'version: 1\nproviders:\n  - id: baidu\n', adapters: [baidu], env: { BAIDU_API_KEY: 'a' } });
+    try {
+        const result = await h.engine.information({ query: '李白', kind: 'encyclopedia' });
+        assert.equal(result.ok, true);
+        assert.equal(h.db.getProvider('baidu')?.day_used, 0, 'the Baike allowance is not the AI-search daily counter');
+        assert.equal(readObserved(h.db, 'baidu', 'encyclopedia')?.count, 1);
+    }
+    finally {
+        h.close();
+    }
+});
+test('Doubao information stays in the shared monthly search quota', async () => {
+    const base = ADAPTERS.find((a) => a.id === 'doubao');
+    const doubao = { ...base, information: async () => ({ ok: true, usage: 1, data: { type: 'card', source: 'doubao', data: [{}] } }) };
+    const h = makeEngine({ yaml: 'version: 1\nproviders:\n  - id: doubao\n', adapters: [doubao], env: { DOUBAO_SEARCH_API_KEY: 'a' } });
+    try {
+        await h.engine.information({ query: '北京天气' });
+        assert.equal(h.db.getProvider('doubao')?.month_used, 1, 'Global and Custom share the account quota');
+    }
+    finally {
+        h.close();
+    }
+});
+test('Zhihu content fetch is observed separately from Zhihu search quota', async () => {
+    const base = ADAPTERS.find((a) => a.id === 'zhihu');
+    const zhihu = { ...base, fetch: async () => ({ ok: true, usage: 1, data: { url: 'https://www.zhihu.com/p/1', content: 'text' } }) };
+    const h = makeEngine({ yaml: 'version: 1\nproviders:\n  - id: zhihu\n', adapters: [zhihu], env: { ZHIHU_API_KEY: 'a' } });
+    try {
+        const result = await h.engine.fetch({ url: 'https://www.zhihu.com/p/1' });
+        assert.equal(result.ok, true);
+        assert.equal(h.db.getProvider('zhihu')?.day_used, 0, 'content endpoints are metered separately');
+        assert.equal(readObserved(h.db, 'zhihu', 'content')?.count, 1);
+    }
+    finally {
+        h.close();
+    }
+});
+test('Zhihu search is preferred and fallback remains site constrained', async () => {
+    const calls = [];
+    const baseZhihu = ADAPTERS.find((a) => a.id === 'zhihu');
+    const baseTavily = ADAPTERS.find((a) => a.id === 'tavily');
+    const zhihu = { ...baseZhihu, search: async (_ctx, req) => {
+            calls.push({ id: 'zhihu', ...req });
+            return { ok: false, classification: { kind: 'transient', evidence: 'unavailable' } };
+        } };
+    const tavily = { ...baseTavily, search: async (_ctx, req) => {
+            calls.push({ id: 'tavily', ...req });
+            return { ok: true, usage: 1, data: [
+                    { title: 'good', url: 'https://zhuanlan.zhihu.com/p/123' },
+                    { title: 'spoof', url: 'https://zhihu.com.evil.example/p/1' },
+                    { title: 'outside', url: 'https://example.com/' },
+                ] };
+        } };
+    const yaml = `version: 1\nproviders:\n  - id: tavily\n    priority: 10\n  - id: zhihu\n    priority: 50\n    account:\n      db: global\n`;
+    const h = makeEngine({ yaml, adapters: [tavily, zhihu], env: { TAVILY_API_KEY: 'a', ZHIHU_API_KEY: 'b' } });
+    try {
+        const result = await h.engine.search({ query: '经验', site: 'zhihu' });
+        assert.equal(result.ok, true);
+        if (result.ok)
+            assert.deepEqual(result.data.map((x) => x.title), ['good']);
+        assert.deepEqual(calls.map((c) => c.id), ['zhihu', 'tavily']);
+        assert.equal(calls[0]?.site, 'zhihu');
+        assert.match(calls[1]?.query ?? '', /site:zhihu\.com/);
+    }
+    finally {
+        h.close();
+    }
+});
+test('a Baike URL is offered to Baidu first, then falls back to the ordinary chain', async () => {
+    const baseBaidu = ADAPTERS.find((a) => a.id === 'baidu');
+    const baseTavily = ADAPTERS.find((a) => a.id === 'tavily');
+    const order = [];
+    const baidu = { ...baseBaidu, fetch: async () => { order.push('baidu'); return { ok: false, classification: { kind: 'our_problem', evidence: 'no abstract' } }; } };
+    const tavily = { ...baseTavily, fetch: async () => { order.push('tavily'); return { ok: true, usage: 1, data: { url: 'https://baike.baidu.com/item/x/1', content: 'page text' } }; } };
+    const yaml = 'version: 1\nproviders:\n  - id: tavily\n    priority: 10\n  - id: baidu\n    priority: 90\n';
+    const h = makeEngine({ yaml, adapters: [tavily, baidu], env: { TAVILY_API_KEY: 'a', BAIDU_API_KEY: 'b' } });
+    try {
+        const result = await h.engine.fetch({ url: 'https://baike.baidu.com/item/%E6%9D%8E%E7%99%BD/1' });
+        assert.equal(result.ok, true);
+        assert.deepEqual(order, ['baidu', 'tavily']);
+    }
+    finally {
+        h.close();
+    }
+    const other = makeEngine({ yaml, adapters: [tavily, baidu], env: { TAVILY_API_KEY: 'a', BAIDU_API_KEY: 'b' } });
+    try {
+        order.length = 0;
+        await other.engine.fetch({ url: 'https://example.com/a' });
+        assert.deepEqual(order, ['tavily'], 'an unrelated URL keeps the configured order');
+    }
+    finally {
+        other.close();
+    }
+});
+test('empty Zhihu results count usage and site query continues to fallback', async () => {
+    const baseZhihu = ADAPTERS.find((a) => a.id === 'zhihu');
+    const baseTavily = ADAPTERS.find((a) => a.id === 'tavily');
+    const zhihu = { ...baseZhihu, search: async () => ({ ok: true, usage: 1, data: [] }) };
+    const tavily = { ...baseTavily, search: async () => ({ ok: true, usage: 1, data: [
+                { title: 'site', url: 'https://www.zhihu.com/question/1' },
+            ] }) };
+    const yaml = `version: 1\nproviders:\n  - id: tavily\n    priority: 10\n  - id: zhihu\n    priority: 50\n`;
+    const h = makeEngine({ yaml, adapters: [tavily, zhihu], env: { TAVILY_API_KEY: 'a', ZHIHU_API_KEY: 'b' } });
+    try {
+        const result = await h.engine.search({ query: '经验 site:zhihu.com' });
+        assert.equal(result.ok, true);
+        if (result.ok)
+            assert.equal(result.data[0]?.title, 'site');
+        assert.equal(h.db.getProvider('zhihu')?.day_used, 1);
+        assert.equal(h.db.getProvider('zhihu')?.is_available, 0);
+    }
+    finally {
+        h.close();
+    }
+});
+test('information with no cards counts the call and falls back to labeled web results', async () => {
+    const base = ADAPTERS.find((a) => a.id === 'doubao');
+    const doubao = { ...base,
+        information: async () => ({ ok: true, usage: 1, data: { type: 'card', source: 'doubao', data: [] } }),
+        search: async () => ({ ok: true, usage: 1, data: [{ title: 'weather page', url: 'https://example.org/weather' }] }),
+    };
+    const h = makeEngine({ yaml: 'version: 1\nproviders:\n  - id: doubao\n', adapters: [doubao], env: { DOUBAO_SEARCH_API_KEY: 'a' } });
+    try {
+        const result = await h.engine.information({ query: '北京天气' });
+        assert.equal(result.ok, true);
+        if (result.ok) {
+            assert.equal(result.data.type, 'web-fallback');
+            assert.deepEqual(result.data.data, [{ title: 'weather page', url: 'https://example.org/weather' }]);
+        }
+        assert.equal(h.db.getProvider('doubao')?.month_used, 2);
+    }
+    finally {
+        h.close();
+    }
+});
+test('information API rejects conflicting source and kind before provider calls', async () => {
+    let calls = 0;
+    const base = ADAPTERS.find((a) => a.id === 'doubao');
+    const doubao = { ...base, information: async () => { calls += 1; return { ok: true, usage: 1, data: { type: 'card', source: 'doubao', data: [{}] } }; } };
+    const h = makeEngine({ yaml: 'version: 1\nproviders:\n  - id: doubao\n', adapters: [doubao], env: { DOUBAO_SEARCH_API_KEY: 'a' } });
+    try {
+        const result = await h.engine.information({ query: '百科', kind: 'encyclopedia', source: 'doubao' });
+        assert.equal(result.ok, false);
+        if (!result.ok)
+            assert.equal(result.reason, 'config_error');
+        assert.equal(calls, 0);
+    }
+    finally {
+        h.close();
+    }
+});
 test('a successful search returns results and counts usage in the actual billing unit', async () => {
     const h = makeEngine({ routes: { 'https://api.tavily.com/search': { status: 200, body: TAVILY_SEARCH_OK } } });
     const result = await h.engine.search({ query: 'x' });

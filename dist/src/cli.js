@@ -19,7 +19,7 @@ import { createForagix } from './index.js';
 export const EXIT_OK = 0;
 export const EXIT_REFUSED = 2;
 export const EXIT_ERROR = 1;
-const COMMANDS = ['search', 'fetch', 'status'];
+const COMMANDS = ['search', 'fetch', 'information', 'status'];
 class UsageError extends Error {
 }
 const FLAGS_WITH_VALUE = new Set([
@@ -28,6 +28,9 @@ const FLAGS_WITH_VALUE = new Set([
     '--credentials',
     '--query',
     '--url',
+    '--kind',
+    '--source',
+    '--site',
     '--max-results',
 ]);
 const FLAGS_BOOLEAN = new Set(['--problems', '--input-json', '--help', '--version']);
@@ -79,6 +82,9 @@ function parseArgs(argv) {
         command: command,
         query: values.get('--query') ?? null,
         url: values.get('--url') ?? null,
+        kind: values.get('--kind') ?? null,
+        source: values.get('--source') ?? null,
+        site: values.get('--site') ?? null,
         maxResults,
         problems: booleans.has('--problems'),
         configPath: values.get('--config') ?? null,
@@ -116,6 +122,13 @@ function fromStdin(raw) {
         if (typeof obj['url'] !== 'string')
             throw new UsageError('--input-json: url must be a string');
         out.url = obj['url'];
+    }
+    for (const name of ['kind', 'source', 'site']) {
+        if (obj[name] !== undefined) {
+            if (typeof obj[name] !== 'string')
+                throw new UsageError(`--input-json: ${name} must be a string`);
+            out[name] = obj[name];
+        }
     }
     if (obj['maxResults'] !== undefined) {
         const n = obj['maxResults'];
@@ -162,12 +175,14 @@ function resolveDataDir(io, requested) {
         return null;
     }
 }
-const HELP = `foragix — Search and Fetch for agents, across multiple providers.
+const HELP = `foragix — Search, Fetch and structured Information for agents, across multiple providers.
 
 Usage:
-  foragix search --query <text> [--max-results <n>]
-  foragix fetch  --url <url>
-  foragix status [--problems]
+  foragix search      --query <text> [--max-results <n>] [--site zhihu]
+  foragix fetch       --url <url>
+  foragix information --query <text> [--kind auto|ruyi|encyclopedia|video]
+                                     [--source doubao|baidu]
+  foragix status      [--problems]
 
 Options:
   --config <path>        Config file (default: ~/.foragix/config.yaml; the built-in defaults
@@ -280,6 +295,24 @@ export async function runCli(argv, ioOverrides = {}) {
         const query = args.query ?? request.query ?? null;
         const url = args.url ?? request.url ?? null;
         const maxResults = args.maxResults ?? request.maxResults ?? null;
+        const kind = args.kind ?? request.kind ?? null;
+        const source = args.source ?? request.source ?? null;
+        const site = args.site ?? request.site ?? null;
+        if (site !== null && site !== 'zhihu')
+            throw new UsageError('invalid --site');
+        if (site !== null && command !== 'search')
+            throw new UsageError('--site is only valid for search');
+        if (kind !== null && !['auto', 'ruyi', 'encyclopedia', 'video'].includes(kind))
+            throw new UsageError('invalid --kind');
+        if (source !== null && !['doubao', 'baidu'].includes(source))
+            throw new UsageError('invalid --source');
+        if (command !== 'information' && (kind !== null || source !== null)) {
+            throw new UsageError('--kind and --source are only valid for information');
+        }
+        if (command === 'information' && ((kind === 'ruyi' && source === 'baidu') ||
+            ((kind === 'encyclopedia' || kind === 'video') && source === 'doubao'))) {
+            throw new UsageError('--kind conflicts with --source');
+        }
         // The config is an optional override layer. Every default — provider list, priorities,
         // allow_paid gate — is built into the code, so a missing file is the normal first-run state.
         const requestedConfig = args.configPath ?? io.env['FORAGIX_CONFIG'] ?? null;
@@ -305,8 +338,8 @@ export async function runCli(argv, ioOverrides = {}) {
         // declare itself with FORAGIX_HOST_ENV and its layer wins; `--credentials` replaces both.
         const explicitCredentials = args.credentialFilePath ?? io.env['FORAGIX_CREDENTIALS'] ?? null;
         const credentialFilePaths = agentEnvFiles(io.env, io.cwd ?? process.cwd(), explicitCredentials);
-        if (command === 'search' && (query === null || query.trim() === '')) {
-            throw new UsageError('search requires --query <text>');
+        if ((command === 'search' || command === 'information') && (query === null || query.trim() === '')) {
+            throw new UsageError(`${command} requires --query <text>`);
         }
         if (command === 'fetch' && (url === null || url.trim() === '')) {
             throw new UsageError('fetch requires --url <url>');
@@ -328,6 +361,16 @@ export async function runCli(argv, ioOverrides = {}) {
                 const result = await app.search({
                     query: query,
                     ...(maxResults === null ? {} : { maxResults }),
+                    ...(site === 'zhihu' ? { site: 'zhihu' } : {}),
+                });
+                payload = result;
+                exitCode = result.ok ? EXIT_OK : EXIT_REFUSED;
+            }
+            else if (command === 'information') {
+                const result = await app.information({
+                    query: query,
+                    ...(kind === null ? {} : { kind: kind }),
+                    ...(source === null ? {} : { source: source }),
                 });
                 payload = result;
                 exitCode = result.ok ? EXIT_OK : EXIT_REFUSED;

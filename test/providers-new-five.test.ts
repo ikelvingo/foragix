@@ -130,6 +130,16 @@ test('zhihu search picks the endpoint by the account option and strips highlight
   assert.match(calls[0]!.headers['x-request-timestamp'] ?? '', /^\d+$/);
 });
 
+test('explicit Zhihu site search overrides global mode and caps Count at ten', async () => {
+  const calls: CapturedCall[] = [];
+  const ctx = makeContext(calls, [{ status: 200, body: { Code: 0, Data: { Items: [] } } }], { db: 'global' });
+  await zhihuAdapter.search!(ctx, { query: 'q', maxResults: 30, site: 'zhihu' });
+  const url = new URL(calls[0]!.url);
+  assert.equal(url.pathname, '/api/v1/content/zhihu_search');
+  assert.equal(url.searchParams.get('Count'), '10');
+  assert.equal(url.searchParams.has('SearchDB'), false);
+});
+
 test('zhihu global mode hits the global_search endpoint without SearchDB on zhihu', async () => {
   for (const [account, expectedPath, hasSearchDb] of [
     [{ db: 'global' }, '/api/v1/content/global_search', true],
@@ -169,6 +179,47 @@ test('doubao custom variant posts the camel-case body and maps WebResults', asyn
   assert.deepEqual(JSON.parse(calls[0]!.body ?? '{}'), { Query: 'q', SearchType: 'web' });
 });
 
+test('doubao information uses Custom and preserves cards without URLs or unknown fields', async () => {
+  const calls: CapturedCall[] = [];
+  const cards = [{ CardType: 'weather', WeatherCard: { Condition: { Temp: 20 }, ExtraFutureField: 'kept' } }];
+  const ctx = makeContext(calls, [{ status: 200, body: { Result: { CardResults: cards } } }], { version: 'global' });
+  assert.ok(doubaoAdapter.information !== undefined);
+  const outcome = await doubaoAdapter.information!(ctx, { query: '北京天气' });
+  assert.equal(outcome.ok, true);
+  if (outcome.ok) {
+    assert.equal(outcome.data.type, 'card');
+    assert.equal(outcome.data.source, 'doubao');
+    assert.deepEqual(outcome.data.data, cards);
+  }
+  assert.equal(new URL(calls[0]!.url).pathname, '/search_api/web_search');
+  assert.deepEqual(JSON.parse(calls[0]!.body ?? '{}'), { Query: '北京天气', SearchType: 'web' });
+});
+
+test('doubao information retains all documented card shapes without narrowing fields', async () => {
+  const names = ['WeatherCard', 'LotteryCard', 'MetalCard', 'ExchangeRateCard', 'HolidayCard', 'HanziCard',
+    'TrainScheduleCard', 'TrainRouteCard', 'FlightRouteCard', 'SportsMatchCard', 'ActorWorksCard',
+    'TaxEnquiryCard', 'MacroEconomyCard', 'ZipcodeCard', 'BasketballEventCard', 'BasketballMatchCard',
+    'BasketballTeamCard', 'IndexQuoteSnapshotCard', 'IndexTrendCard', 'StockFinanceCard',
+    'IndexConstituentsCard', 'FundFlowCard', 'WorldTimeCard'];
+  const cards = names.map((name) => ({ CardType: name, [name]: { nested: { value: 42 }, futureField: true } }));
+  const ctx = makeContext([], [{ status: 200, body: { Result: { CardResults: cards } } }]);
+  const outcome = await doubaoAdapter.information!(ctx, { query: 'test' });
+  assert.equal(outcome.ok, true);
+  if (outcome.ok) assert.deepEqual(outcome.data.data, cards);
+});
+
+test('doubao information preserves RuyiInfo web items when structured cards are absent', async () => {
+  const calls: CapturedCall[] = [];
+  const item = { Title: '油价', SiteName: '火山如意', RuyiInfo: { Type: 'oil_price', Extra: 'kept' }, Content: 'data' };
+  const ctx = makeContext(calls, [{ status: 200, body: { Result: { CardResults: null, WebResults: [item, { Title: 'ordinary' }] } } }]);
+  const outcome = await doubaoAdapter.information!(ctx, { query: '油价' });
+  assert.equal(outcome.ok, true);
+  if (outcome.ok) {
+    assert.equal(outcome.data.type, 'ruyi');
+    assert.deepEqual(outcome.data.data, [item]);
+  }
+});
+
 test('doubao quota semantics: paid-gated monthly 500 shared pool', () => {
   const init = doubaoAdapter.init({});
   assert.equal(init.canCharge, true);
@@ -176,7 +227,7 @@ test('doubao quota semantics: paid-gated monthly 500 shared pool', () => {
   assert.equal(init.monthLimit, 500);
 });
 
-test('zhihu and doubao capabilities stay search-only when no fetch exists', () => {
-  assert.deepEqual(zhihuAdapter.capabilities, ['search']);
-  assert.deepEqual(doubaoAdapter.capabilities, ['search']);
+test('provider capability declarations match their implemented operations', () => {
+  assert.deepEqual(zhihuAdapter.capabilities, ['search', 'fetch']);
+  assert.deepEqual(doubaoAdapter.capabilities, ['search', 'information']);
 });

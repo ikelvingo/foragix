@@ -15,13 +15,13 @@ import { ConfigError, type ValidationIssue } from './config/types.js';
 import { agentEnvFiles } from './credentials/load.js';
 import { homedir } from 'node:os';
 import { describeError, redact } from './errors/redact.js';
-import { createForagix, type Foragix, type ForagixOptions } from './index.js';
+import { createForagix, type Foragix, type ForagixOptions, type InformationRequest } from './index.js';
 
 export const EXIT_OK = 0;
 export const EXIT_REFUSED = 2;
 export const EXIT_ERROR = 1;
 
-const COMMANDS = ['search', 'fetch', 'status'] as const;
+const COMMANDS = ['search', 'fetch', 'information', 'status'] as const;
 export type Command = (typeof COMMANDS)[number];
 
 /** Machine-readable failure codes. Stable; agents may branch on these. */
@@ -50,6 +50,9 @@ interface ParsedArgs {
   readonly command: Command | null;
   readonly query: string | null;
   readonly url: string | null;
+  readonly kind: string | null;
+  readonly source: string | null;
+  readonly site: string | null;
   readonly maxResults: number | null;
   readonly problems: boolean;
   readonly configPath: string | null;
@@ -68,6 +71,9 @@ const FLAGS_WITH_VALUE = new Set([
   '--credentials',
   '--query',
   '--url',
+  '--kind',
+  '--source',
+  '--site',
   '--max-results',
 ]);
 const FLAGS_BOOLEAN = new Set(['--problems', '--input-json', '--help', '--version']);
@@ -124,6 +130,9 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
     command: command as Command | null,
     query: values.get('--query') ?? null,
     url: values.get('--url') ?? null,
+    kind: values.get('--kind') ?? null,
+    source: values.get('--source') ?? null,
+    site: values.get('--site') ?? null,
     maxResults,
     problems: booleans.has('--problems'),
     configPath: values.get('--config') ?? null,
@@ -140,6 +149,9 @@ interface StdinRequest {
   readonly command?: string;
   readonly query?: string;
   readonly url?: string;
+  readonly kind?: string;
+  readonly source?: string;
+  readonly site?: string;
   readonly maxResults?: number;
 }
 
@@ -167,6 +179,12 @@ function fromStdin(raw: string): StdinRequest {
   if (obj['url'] !== undefined) {
     if (typeof obj['url'] !== 'string') throw new UsageError('--input-json: url must be a string');
     out.url = obj['url'];
+  }
+  for (const name of ['kind', 'source', 'site'] as const) {
+    if (obj[name] !== undefined) {
+      if (typeof obj[name] !== 'string') throw new UsageError(`--input-json: ${name} must be a string`);
+      out[name] = obj[name];
+    }
   }
   if (obj['maxResults'] !== undefined) {
     const n = obj['maxResults'];
@@ -216,12 +234,14 @@ function resolveDataDir(io: CliIo, requested: string | null): string | null {
   }
 }
 
-const HELP = `foragix — Search and Fetch for agents, across multiple providers.
+const HELP = `foragix — Search, Fetch and structured Information for agents, across multiple providers.
 
 Usage:
-  foragix search --query <text> [--max-results <n>]
-  foragix fetch  --url <url>
-  foragix status [--problems]
+  foragix search      --query <text> [--max-results <n>] [--site zhihu]
+  foragix fetch       --url <url>
+  foragix information --query <text> [--kind auto|ruyi|encyclopedia|video]
+                                     [--source doubao|baidu]
+  foragix status      [--problems]
 
 Options:
   --config <path>        Config file (default: ~/.foragix/config.yaml; the built-in defaults
@@ -339,6 +359,20 @@ export async function runCli(argv: readonly string[], ioOverrides: Partial<CliIo
     const query = args.query ?? request.query ?? null;
     const url = args.url ?? request.url ?? null;
     const maxResults = args.maxResults ?? request.maxResults ?? null;
+    const kind = args.kind ?? request.kind ?? null;
+    const source = args.source ?? request.source ?? null;
+    const site = args.site ?? request.site ?? null;
+    if (site !== null && site !== 'zhihu') throw new UsageError('invalid --site');
+    if (site !== null && command !== 'search') throw new UsageError('--site is only valid for search');
+    if (kind !== null && !['auto', 'ruyi', 'encyclopedia', 'video'].includes(kind)) throw new UsageError('invalid --kind');
+    if (source !== null && !['doubao', 'baidu'].includes(source)) throw new UsageError('invalid --source');
+    if (command !== 'information' && (kind !== null || source !== null)) {
+      throw new UsageError('--kind and --source are only valid for information');
+    }
+    if (command === 'information' && ((kind === 'ruyi' && source === 'baidu') ||
+        ((kind === 'encyclopedia' || kind === 'video') && source === 'doubao'))) {
+      throw new UsageError('--kind conflicts with --source');
+    }
 
     // The config is an optional override layer. Every default — provider list, priorities,
     // allow_paid gate — is built into the code, so a missing file is the normal first-run state.
@@ -366,8 +400,8 @@ export async function runCli(argv: readonly string[], ioOverrides: Partial<CliIo
     const explicitCredentials = args.credentialFilePath ?? io.env['FORAGIX_CREDENTIALS'] ?? null;
     const credentialFilePaths = agentEnvFiles(io.env, io.cwd ?? process.cwd(), explicitCredentials);
 
-    if (command === 'search' && (query === null || query.trim() === '')) {
-      throw new UsageError('search requires --query <text>');
+    if ((command === 'search' || command === 'information') && (query === null || query.trim() === '')) {
+      throw new UsageError(`${command} requires --query <text>`);
     }
     if (command === 'fetch' && (url === null || url.trim() === '')) {
       throw new UsageError('fetch requires --url <url>');
@@ -391,6 +425,15 @@ export async function runCli(argv: readonly string[], ioOverrides: Partial<CliIo
         const result = await app.search({
           query: query as string,
           ...(maxResults === null ? {} : { maxResults }),
+          ...(site === 'zhihu' ? { site: 'zhihu' as const } : {}),
+        });
+        payload = result;
+        exitCode = result.ok ? EXIT_OK : EXIT_REFUSED;
+      } else if (command === 'information') {
+        const result = await app.information({
+          query: query as string,
+          ...(kind === null ? {} : { kind: kind as NonNullable<InformationRequest['kind']> }),
+          ...(source === null ? {} : { source: source as NonNullable<InformationRequest['source']> }),
         });
         payload = result;
         exitCode = result.ok ? EXIT_OK : EXIT_REFUSED;

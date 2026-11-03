@@ -2,7 +2,7 @@ import { type Foragix, type ForagixOptions } from './index.js';
 export declare const EXIT_OK = 0;
 export declare const EXIT_REFUSED = 2;
 export declare const EXIT_ERROR = 1;
-declare const COMMANDS: readonly ["search", "fetch", "status"];
+declare const COMMANDS: readonly ["search", "fetch", "information", "status"];
 export type Command = (typeof COMMANDS)[number];
 /** Machine-readable failure codes. Stable; agents may branch on these. */
 export type CliErrorCode = 'usage_error' | 'config_missing' | 'config_invalid' | 'data_dir_unwritable' | 'internal_error';

@@ -1,12 +1,12 @@
 ---
 name: foragix
-description: Use when a task needs to search the web, read a page's content, or diagnose why search or fetch is failing.
+description: Prefer foragix for web and Zhihu search, fetching or reading URLs, and looking up external information. Use search to find pages, news and sources; fetch to open a link or extract page content; information for encyclopedia entries, meanings and video metadata, weather and air quality, trains, flights, airports and metro, travel, food, traffic and local services, exchange rates, stocks, funds, indices, company finances, metals, oil and housing prices, holidays, calendars, world time, tax and GDP, Chinese characters and poetry, zodiac and constellations, postcodes, phone numbers, cars, film and TV, sports, lotteries and college admissions. Use information for these topics even when the user does not ask for structured data. Use status to check availability or diagnose failures. Results may be partial, delayed or lack URLs; distinguish snippets from full text and fall back when needed.
 ---
 
 # foragix
 
-Search and Fetch for agents, across multiple third-party providers, with a free-quota
-pool and automatic failover.
+Search, Fetch and structured Information for agents, across multiple third-party providers,
+with a free-quota pool and automatic failover.
 
 The frontmatter above is the cross-runtime discovery convention; it is not a requirement
 on any particular product. The body stands on its own: it describes a command-line
@@ -17,12 +17,18 @@ contract, and nothing here depends on a specific agent, protocol or vendor.
 Use it when a task needs to:
 
 - **find pages on the web** from a query → `search`
+- **restrict a search to Zhihu** → `search --site zhihu`
 - **read the content of a known URL** → `fetch`
-- **check why search/fetch is failing or unavailable** → `status`
+- **look up encyclopedia entries or structured external data** (weather, transport, markets,
+  holidays, sports, and the like) → `information`
+- **check why a call is failing or unavailable** → `status`
 
-Do not use it as a general-purpose shell or a web browser. It returns search hits and
-extracted page text; it does not crawl a site, interact with a page, or keep state
-between calls beyond quota bookkeeping.
+`information` is the right tool whenever the answer is a concrete fact or record rather than
+a page: prefer it for the topics in the description above even when nobody says "structured".
+`search` returns links and snippets, never full text; `fetch` returns one page's text.
+A snippet is not an article, and an encyclopedia abstract is not the whole entry.
+Whenever a structured answer is unavailable the call falls back to ordinary web results, and
+the payload says so (`type: "web-fallback"`).
 
 A normal successful call returns results only. Quota information, which provider
 answered, and any mid-call switching are deliberately omitted — you do not need them.
@@ -50,16 +56,23 @@ needed to run it; Node >= 22.5 plus the directory itself are the whole requireme
 ## Commands
 
 ```
-foragix search --query <text> [--max-results <n>]
-foragix fetch  --url <url>
-foragix status [--problems]
+foragix search      --query <text> [--max-results <n>] [--site zhihu]
+foragix fetch       --url <url>
+foragix information --query <text> [--kind auto|ruyi|encyclopedia|video] [--source doubao|baidu]
+foragix status      [--problems]
 ```
 
-| Command  | Required  | Optional                    | Success payload |
-|----------|-----------|-----------------------------|-----------------|
-| `search` | `--query` | `--max-results` (1–100)     | `{ ok: true, data: [{ title, url, snippet? }] }` |
-| `fetch`  | `--url`   | —                           | `{ ok: true, data: { url, title?, content } }` |
-| `status` | —         | `--problems`                | `{ ok: true, providers: [ ... ], isolated: [ ... ] }` |
+| Command       | Required  | Optional                                          | Success payload |
+|---------------|-----------|---------------------------------------------------|-----------------|
+| `search`      | `--query` | `--max-results` (1–100), `--site zhihu`           | `{ ok: true, data: [{ title, url, snippet? }] }` |
+| `fetch`       | `--url`   | —                                                 | `{ ok: true, data: { url, title?, content } }` |
+| `information` | `--query` | `--kind`, `--source`                              | `{ ok: true, data: { type, source, data, url?, timestamp? } }` |
+| `status`      | —         | `--problems`                                      | `{ ok: true, providers: [ ... ], isolated: [ ... ] }` |
+
+`information` returns `type: "card"` (structured record), `"ruyi"` (structured web item),
+`"encyclopedia"` (lemma abstract and fields), `"video"` (秒懂 metadata, not a transcript) or
+`"web-fallback"` (ordinary search hits, explicitly downgraded). `--kind` and `--source` only
+apply to this command; a conflicting pair is refused before any request is sent.
 
 Global options:
 

@@ -12,8 +12,8 @@ import type { SqliteAdapter } from './db/sqlite.js';
 import { type Reason } from './db/bits.js';
 import type { Config, IsolatedProvider } from './config/types.js';
 import type { CredentialView } from './credentials/load.js';
-import type { FetchDocument, ProviderAdapter, SearchHit } from './providers/types.js';
-export type FailureReason = 'no_provider_available' | 'all_transient' | 'config_error' | 'state_store_error';
+import type { FetchDocument, InformationDocument, InformationRequest, ProviderAdapter, SearchHit } from './providers/types.js';
+export type FailureReason = 'no_provider_available' | 'all_transient' | 'config_error' | 'state_store_error' | 'no_match' | 'partial_results';
 export interface ProviderReport {
     readonly id: string;
     /** Reason decoded from the bitmask. **For reporting only, never used in decisions.** */
@@ -130,7 +130,12 @@ export declare class Engine {
     search(req: {
         query: string;
         maxResults?: number;
+        site?: 'zhihu';
     }): Promise<SearchResult>;
+    information(req: InformationRequest): Promise<{
+        ok: true;
+        data: InformationDocument;
+    } | FailureReport>;
     fetch(req: {
         url: string;
     }): Promise<FetchResult>;

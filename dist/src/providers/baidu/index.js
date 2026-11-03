@@ -1,4 +1,6 @@
 import { interpret, parseJson, request } from '../http.js';
+import { getContent, searchVideo } from './encyclopedia.js';
+import { lemmaIdFromUrl, parseBaikeUrl } from './target.js';
 import { bodySuggestsQuota, classifyParseFailure } from '../../errors/classify.js';
 import { redact } from '../../errors/redact.js';
 const CREDENTIAL = 'BAIDU_API_KEY';
@@ -12,7 +14,7 @@ function authHeaders(ctx) {
 }
 export const baiduAdapter = {
     id: 'baidu',
-    capabilities: ['search'],
+    capabilities: ['search', 'information', 'fetch'],
     schema: {
         id: 'baidu',
         requiresCredentials: true,
@@ -93,6 +95,60 @@ export const baiduAdapter = {
             ...(typeof r.content === 'string' && r.content !== '' ? { snippet: r.content } : typeof r.date === 'string' ? { snippet: r.date } : {}),
         }));
         return { ok: true, data: hits, usage: this.usageOf?.('search', ctx.config.account) ?? 1 };
+    },
+    /**
+     * 百科 lookup for `information`. The Baike APIs take a name, so the query *is* the key; the
+     * returned payload is preserved whole. This is structured encyclopedia data, not page text.
+     */
+    async information(ctx, req) {
+        const video = req.kind === 'video' || /秒懂百科|秒懂视频/.test(req.query);
+        if (video) {
+            const outcome = await searchVideo(ctx, 'lemmaTitle', req.query);
+            if (!outcome.ok)
+                return outcome;
+            return { ok: true, data: { type: 'video', source: 'baidu', data: outcome.data }, usage: outcome.usage };
+        }
+        const outcome = await getContent(ctx, 'lemmaTitle', req.query);
+        if (!outcome.ok)
+            return outcome;
+        const url = typeof outcome.data.url === 'string' ? outcome.data.url : undefined;
+        return {
+            ok: true,
+            data: { type: 'encyclopedia', source: 'baidu', data: outcome.data, ...(url === undefined ? {} : { url }) },
+            usage: outcome.usage,
+        };
+    },
+    /**
+     * Source-preferred fetch for `baike.baidu.com/item/…`.
+     *
+     * Only a verified answer is used: with a numeric id the returned lemma must carry the same id;
+     * with a bare title the returned title must match. Anything else fails so the engine falls back to
+     * the ordinary fetch chain rather than presenting a different sense as this page.
+     */
+    async fetch(ctx, req) {
+        const target = parseBaikeUrl(req.url);
+        if (target === null) {
+            return { ok: false, classification: { kind: 'our_problem', evidence: 'not a supported Baike URL' } };
+        }
+        const outcome = await getContent(ctx, target.searchType, target.searchKey);
+        if (!outcome.ok)
+            return outcome;
+        const data = outcome.data;
+        if (target.searchType === 'lemmaId') {
+            if (lemmaIdFromUrl(data.url) !== target.searchKey) {
+                return { ok: false, classification: { kind: 'our_problem', evidence: 'returned lemma id does not match the requested page' } };
+            }
+        }
+        else if (typeof data.lemma_title === 'string' && data.lemma_title !== target.searchKey) {
+            return { ok: false, classification: { kind: 'our_problem', evidence: 'returned lemma title does not match the requested page' } };
+        }
+        // The abstract is bounded by the vendor; it is offered as this tool's text, never as the full article.
+        const content = [data.abstract_plain, data.summary, data.lemma_desc].find((v) => typeof v === 'string' && v.trim() !== '');
+        if (content === undefined) {
+            return { ok: false, classification: { kind: 'our_problem', evidence: 'Baike returned no readable abstract' } };
+        }
+        const title = typeof data.lemma_title === 'string' ? data.lemma_title : target.searchKey;
+        return { ok: true, data: { url: req.url, title, content }, usage: outcome.usage };
     },
 };
 //# sourceMappingURL=index.js.map
