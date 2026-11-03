@@ -12,6 +12,20 @@ export TAVILY_API_KEY=<your key>
 ```
 Once installed, the agent uses it through `SKILL.md`; run `status` any time to check the install and missing keys.
 
+## Tools provided by this skill
+
+- **`search`**: Search the web and return relevant pages with snippets.
+- **`fetch`**: Read the content of a specified web page.
+- **`status`**: Check whether search and page-reading providers are available and help diagnose why a service may be unavailable.
+- **`information`**: Look up specific information directly, such as weather, encyclopedia entries, exchange rates, or Zhihu content. In addition to web search and page fetching, the agent can use this tool to choose a suitable source based on the type of question:
+  - **Structured information such as weather, air quality, travel, exchange rates, market quotes, holidays, and sports events**: Prefer [Doubao Search Custom (Volcano Ruyi)](https://docs.volcengine.com/docs/networked-search/huoshan-ruyi-data-structure?lang=zh); it shares its usage count with Doubao Search.
+  - **Baidu Baike entries and senses**: Prefer the Baidu Baike API. Usage is counted separately, with 100 free requests per day.
+  - **Baidu Miaodong (秒懂百科) video information**: Prefer the Baidu Miaodong API. Usage is counted separately, with 50 free requests per day.
+  - **Zhihu content**: Prefer Zhihu site search. Search results are snippets, and searches count toward Zhihu's shared daily allowance of 5,000. When reading a Zhihu page, the agent still attempts to fetch its page content; Zhihu's official full-text API only supports content created by the current account.
+  - **Other web pages**: Continue using the existing web-search and page-fetch providers.
+
+  If the preferred source has no suitable result, the agent tries other available channels and indicates when the result is a fallback. Baike content may be a summary rather than the full entry; Miaodong returns video information, not subtitles. Provider free quotas are counted separately, and exceeding them may incur charges; local usage records do not represent the balance in a provider account.
+
 ## Ways to hand over a key (highest priority first)
 
 1. `--credentials <file path>`: use this key file (any file path works; the environment variable `FORAGIX_CREDENTIALS=<file path>` is equivalent); it replaces every way below.
@@ -85,4 +99,4 @@ Search counters are kept on this machine in `~/.foragix/`; upgrades and reinstal
 ## Known limitations
 - Locally counted usage is an estimate; the provider's own refusal is the authority.
 - Counters follow the machine: another computer or user directory keeps its own separate set.
-- Search and page fetching only; no crawling, no page interaction.
+- Search, page fetching, and information lookup only; no crawling or page interaction.

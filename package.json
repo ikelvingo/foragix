@@ -1,7 +1,7 @@
 {
   "name": "foragix",
-  "version": "0.1.1",
-  "description": "Agent Skill providing Search and Fetch over multiple providers, with a free-quota pool and automatic failover.",
+  "version": "0.2.0",
+  "description": "Agent Skill for web search, page fetching, direct information lookup, and provider status across multiple providers, with pooled free quotas and automatic failover.",
   "type": "module",
   "engines": {
     "node": ">=22.5.0"
