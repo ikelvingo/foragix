@@ -51,8 +51,13 @@ if (!existsSync(entry)) {
     process.exitCode = await runCli(process.argv.slice(2));
   } catch (err) {
     // The single runtime dependency (`yaml`) missing from an installed copy is the one
-    // recoverable start-up failure: bootstrap it once in place, then start again.
-    if (/Cannot find package ['"]yaml['"]/.test(String(err))) {
+    // recoverable start-up failure: bootstrap it once in place, then start again. The env
+    // flag bounds the retry at exactly one attempt per process tree — the spawned rerun
+    // carries it, so a bootstrap that stays broken can never recurse into fresh children.
+    if (
+      process.env['FORAGIX_SELF_HEAL'] !== '1' &&
+      /Cannot find package ['"]yaml['"]/.test(String(err))
+    ) {
       try {
         // A network failure stays the honest failure the fail() branch reports; nothing is hidden.
         // ESM caches a failed resolution for this run, so the retry happens in a fresh process.
@@ -65,6 +70,7 @@ if (!existsSync(entry)) {
         const rerun = spawnSync(process.execPath, [join(here, 'foragix.mjs'), ...process.argv.slice(2)], {
           stdio: 'inherit',
           cwd: join(here, '..'),
+          env: { ...process.env, FORAGIX_SELF_HEAL: '1' },
         });
         process.exitCode = rerun.status ?? 1;
         selfHealed = true;
