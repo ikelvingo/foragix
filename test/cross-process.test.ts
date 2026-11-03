@@ -224,3 +224,30 @@ try {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a second connection joins an existing WAL database instead of blocking in open()', async () => {
+  const dir = newTempDir('foragix-xproc-');
+  const dbPath = join(dir, 'foragix.db');
+  let holder: SqliteAdapter | null = null;
+  try {
+    const setup = SqliteAdapter.open(dbPath, { wal: true }, Date.now);
+    applySchema(setup, DDL);
+    writeSchemaVersion(setup, undefined, DDL);
+    setup.ensureProvider('p1');
+    holder = SqliteAdapter.open(dbPath, { wal: true }, Date.now);
+
+    // The regression this guards: re-promoting an already-WAL file takes a write lock, which on
+    // some filesystems is not bounded by busy_timeout, so a second process hung inside open().
+    const startedAt = Date.now();
+    const result = await runWorker(dbPath, 1);
+    assert.equal(result.code, 0, `opening an existing WAL database must not block: ${result.stderr}`);
+    assert.ok(Date.now() - startedAt < 20_000, 'the second connection must not wait on a lock just to open');
+  } finally {
+    try {
+      holder?.close();
+    } catch {
+      // Closing on a failed assertion must not mask the original failure.
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

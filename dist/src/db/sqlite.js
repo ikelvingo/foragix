@@ -4,6 +4,16 @@
  */
 import { DatabaseSync } from 'node:sqlite';
 import { isKnownMask, TRANSIENT_BIT_MASK } from './bits.js';
+/** Current journal mode of an open connection; 'unknown' when the pragma cannot be read. */
+function currentJournalMode(db) {
+    try {
+        const row = db.prepare('PRAGMA journal_mode').get();
+        return typeof row?.journal_mode === 'string' ? row.journal_mode.toLowerCase() : 'unknown';
+    }
+    catch {
+        return 'unknown';
+    }
+}
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
 export class SqliteAdapter {
     db;
@@ -20,7 +30,10 @@ export class SqliteAdapter {
         const db = new DatabaseSync(path);
         db.exec(`PRAGMA busy_timeout = ${opts.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS}`);
         db.exec('PRAGMA foreign_keys = ON');
-        if (opts.wal === true)
+        // Skipped when the file is already in WAL: the upgrade takes a write lock, and on some
+        // filesystems that wait is not bounded by busy_timeout — a second process would then hang
+        // inside open() instead of simply joining the existing WAL database.
+        if (opts.wal === true && currentJournalMode(db) !== 'wal')
             db.exec('PRAGMA journal_mode = WAL');
         return new SqliteAdapter(db, now);
     }

@@ -61,6 +61,16 @@ export interface ChangeEntry {
   detail?: string;
 }
 
+/** Current journal mode of an open connection; 'unknown' when the pragma cannot be read. */
+function currentJournalMode(db: DatabaseSync): string {
+  try {
+    const row = db.prepare('PRAGMA journal_mode').get() as { journal_mode?: unknown } | undefined;
+    return typeof row?.journal_mode === 'string' ? row.journal_mode.toLowerCase() : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 export interface OpenOptions {
   /** busy timeout, in milliseconds. Bounded retries on concurrent write conflicts, avoiding indefinite blocking. */
   busyTimeoutMs?: number;
@@ -87,7 +97,10 @@ export class SqliteAdapter {
     const db = new DatabaseSync(path);
     db.exec(`PRAGMA busy_timeout = ${opts.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS}`);
     db.exec('PRAGMA foreign_keys = ON');
-    if (opts.wal === true) db.exec('PRAGMA journal_mode = WAL');
+    // Skipped when the file is already in WAL: the upgrade takes a write lock, and on some
+    // filesystems that wait is not bounded by busy_timeout — a second process would then hang
+    // inside open() instead of simply joining the existing WAL database.
+    if (opts.wal === true && currentJournalMode(db) !== 'wal') db.exec('PRAGMA journal_mode = WAL');
     return new SqliteAdapter(db, now);
   }
 
