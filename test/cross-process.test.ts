@@ -96,7 +96,9 @@ test('separate processes can write the same database concurrently without losing
 test('a second process waits for a held write transaction instead of failing outright', async () => {
   const dir = newTempDir('foragix-xproc-');
   const dbPath = join(dir, 'foragix.db');
+  const openedFile = join(dir, 'opened');
   const goFile = join(dir, 'go');
+  const elapsedFile = join(dir, 'elapsed');
   let holder: SqliteAdapter | null = null;
   let child: ReturnType<typeof spawn> | null = null;
   try {
@@ -108,54 +110,41 @@ test('a second process waits for a held write transaction instead of failing out
 
     holder = SqliteAdapter.open(dbPath, { wal: true }, Date.now);
 
-    // Ordering is load-bearing: `open()` itself may take a write lock (it sets journal_mode),
-    // so the child must finish opening BEFORE the parent takes the lock, and must attempt its
-    // write only afterwards. Signalling in the other order would deadlock.
+    // Ordering is load-bearing: the child must finish opening BEFORE the parent takes the write
+    // lock, and must attempt its write only afterwards. Signalling in the other order deadlocks.
     //
-    // The child waits for a sentinel FILE rather than on stdin: a top-level stdin await leaves
-    // Node with an unsettled top-level await if the pipe closes, which made this test flaky.
+    // Every signal is a FILE, not stdout: some sandboxes swallow a child's piped stdout entirely
+    // (the child runs and exits 0 while the parent reads nothing), which made this test fail for
+    // a reason that had nothing to do with SQLite.
     const childScript = `
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { SqliteAdapter } from ${JSON.stringify(SQLITE_URL)};
 const db = SqliteAdapter.open(${JSON.stringify(dbPath)}, { wal: true, busyTimeoutMs: 8000 }, Date.now);
-process.stdout.write('opened\\n');
+writeFileSync(${JSON.stringify(openedFile)}, '');
 const deadline = Date.now() + 25000;
 while (!existsSync(${JSON.stringify(goFile)})) {
   if (Date.now() > deadline) {
-    // Report what this process can actually see, so a sandbox/namespace difference is visible.
-    process.stderr.write('child: sentinel never appeared; dir=' + JSON.stringify(${JSON.stringify(dir)}) +
-      ' exists=' + existsSync(${JSON.stringify(dir)}) +
-      ' tmpdir=' + JSON.stringify((await import('node:os')).tmpdir()) + '\\n');
+    writeFileSync(${JSON.stringify(join(dir, 'child-timeout'))}, 'sentinel never appeared');
     process.exit(1);
   }
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
-process.stdout.write('writing\\n');
 const startedAt = Date.now();
 try {
   db.setBits('p1', ${BIT.CREDENTIAL_MISSING});
 } finally {
-  process.stdout.write('elapsed ' + (Date.now() - startedAt) + '\\n');
+  writeFileSync(${JSON.stringify(elapsedFile)}, String(Date.now() - startedAt));
   db.close();
 }
 `;
 
     const proc = spawn(process.execPath, ['--input-type=module', '-e', childScript], {
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: 'ignore',
     });
     child = proc;
 
-    let stdout = '';
-    let stderr = '';
     let exited = false;
     let exitCode: number | null = null;
-    proc.stdout.on('data', (chunk) => {
-      stdout += String(chunk);
-    });
-    proc.stderr.on('data', (chunk) => {
-      stderr += String(chunk);
-    });
-    // Registered once, at spawn time: waiting on 'close' later could miss the event entirely.
     void new Promise<void>((resolve) => {
       proc.on('close', (code) => {
         exited = true;
@@ -164,46 +153,49 @@ try {
       });
     });
 
-    const waitFor = (needle: string): Promise<void> =>
+    const why = (): string => {
+      const marker = join(dir, 'child-timeout');
+      return existsSync(marker)
+        ? `child timed out: ${readFileSync(marker, 'utf8')}`
+        : `child state: opened=${existsSync(openedFile)} go=${existsSync(goFile)} elapsed=${existsSync(elapsedFile)} exited=${exited} code=${exitCode ?? 'none'}`;
+    };
+
+    const waitForFile = (file: string, label: string): Promise<void> =>
       new Promise((resolve, reject) => {
         const deadline = Date.now() + 25000;
-        const diagnostic = (): string =>
-          `stdout=[${stdout.trim()}] stderr=[${stderr.trim()}] ` +
-          `sentinel=${existsSync(goFile)} tmpdir=${tmpdir()} pid=${proc.pid ?? 'none'}`;
         const tick = (): void => {
-          if (stdout.includes(needle)) return resolve();
-          if (exited) return reject(new Error(`child exited before "${needle}": ${diagnostic()}`));
-          if (Date.now() > deadline) return reject(new Error(`timed out waiting for "${needle}": ${diagnostic()}`));
+          if (existsSync(file)) return resolve();
+          if (exited) return reject(new Error(`child exited before ${label}; ${why()}`));
+          if (Date.now() > deadline) return reject(new Error(`timed out waiting for ${label}; ${why()}`));
           setTimeout(tick, 10);
         };
         tick();
       });
 
     // The child holds the database open and is idle. Now take the write lock ...
-    await waitFor('opened');
+    await waitForFile(openedFile, 'the child to open the database');
     holder.exec('BEGIN IMMEDIATE');
     holder.setBits('p1', BIT.QUOTA_DAY);
 
     // ... release it to write, and hold the lock a while longer ...
     writeFileSync(goFile, '');
-    await waitFor('writing');
     const holdMs = 250;
     await new Promise((resolve) => setTimeout(resolve, holdMs));
 
     // ... then commit. A writer that did not wait would already have failed with SQLITE_BUSY.
     holder.exec('COMMIT');
 
-    await waitFor('elapsed');
+    await waitForFile(elapsedFile, 'the child to finish its write');
     const deadline = Date.now() + 25000;
     while (!exited && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    assert.ok(exited, `child did not exit: ${stderr}`);
-    assert.equal(exitCode, 0, `the waiting writer must succeed rather than fail on the lock: ${stderr}`);
+    assert.ok(exited, `child did not exit; ${why()}`);
+    assert.equal(exitCode, 0, `the waiting writer must succeed rather than fail on the lock; ${why()}`);
 
     // The elapsed time is the evidence that it actually waited on the lock rather than
     // slipping through before the parent committed.
-    const elapsed = Number(/elapsed (\d+)/.exec(stdout)?.[1] ?? '0');
+    const elapsed = Number(readFileSync(elapsedFile, 'utf8'));
     assert.ok(elapsed >= holdMs - 50, `the writer must have waited for the lock, measured ${elapsed}ms`);
 
     const mask = holder.getProvider('p1')?.is_available ?? 0;
