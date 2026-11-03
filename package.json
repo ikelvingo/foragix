@@ -1,6 +1,6 @@
 {
   "name": "foragix",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Agent Skill providing Search and Fetch over multiple providers, with a free-quota pool and automatic failover.",
   "type": "module",
   "engines": {
