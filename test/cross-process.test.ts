@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync, spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -122,7 +122,10 @@ process.stdout.write('opened\\n');
 const deadline = Date.now() + 25000;
 while (!existsSync(${JSON.stringify(goFile)})) {
   if (Date.now() > deadline) {
-    process.stderr.write('child: sentinel never appeared\\n');
+    // Report what this process can actually see, so a sandbox/namespace difference is visible.
+    process.stderr.write('child: sentinel never appeared; dir=' + JSON.stringify(${JSON.stringify(dir)}) +
+      ' exists=' + existsSync(${JSON.stringify(dir)}) +
+      ' tmpdir=' + JSON.stringify((await import('node:os')).tmpdir()) + '\\n');
     process.exit(1);
   }
   await new Promise((resolve) => setTimeout(resolve, 10));
@@ -164,10 +167,13 @@ try {
     const waitFor = (needle: string): Promise<void> =>
       new Promise((resolve, reject) => {
         const deadline = Date.now() + 25000;
+        const diagnostic = (): string =>
+          `stdout=[${stdout.trim()}] stderr=[${stderr.trim()}] ` +
+          `sentinel=${existsSync(goFile)} tmpdir=${tmpdir()} pid=${proc.pid ?? 'none'}`;
         const tick = (): void => {
           if (stdout.includes(needle)) return resolve();
-          if (exited) return reject(new Error(`child exited before "${needle}": ${stderr}`));
-          if (Date.now() > deadline) return reject(new Error(`timed out waiting for "${needle}": ${stderr}`));
+          if (exited) return reject(new Error(`child exited before "${needle}": ${diagnostic()}`));
+          if (Date.now() > deadline) return reject(new Error(`timed out waiting for "${needle}": ${diagnostic()}`));
           setTimeout(tick, 10);
         };
         tick();
