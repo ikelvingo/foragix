@@ -59,6 +59,17 @@ test('Baidu fetch refuses a different sense instead of passing it off as the req
   assert.equal(out.ok, false, 'a mismatched lemma id must fall back, not be returned as this page');
 });
 
+test('Baidu fetch rejects a response whose URL is not a Baike page for that id', async () => {
+  const url = 'https://baike.baidu.com/item/%E6%9D%8E%E7%99%BD/123';
+  const spoofed = { code: '0', result: { ...LEMMA, url: 'https://evil.example/not/item/123' } };
+  const out = await baiduAdapter.fetch!(context([], [spoofed]), { url });
+  assert.equal(out.ok, false, 'the same trailing number on a foreign host proves nothing');
+
+  const wrongPath = { code: '0', result: { ...LEMMA, url: 'https://baike.baidu.com/other/123' } };
+  const out2 = await baiduAdapter.fetch!(context([], [wrongPath]), { url });
+  assert.equal(out2.ok, false, 'only the /item/<name>/<id> shape identifies a lemma page');
+});
+
 test('Baidu fetch ignores non-Baike URLs so the ordinary chain handles them', async () => {
   const out = await baiduAdapter.fetch!(context([], [{}]), { url: 'https://example.com/article' });
   assert.equal(out.ok, false);

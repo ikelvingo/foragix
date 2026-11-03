@@ -28,13 +28,17 @@ export function recordObserved(
   endpoint: ObservedEndpoint,
   now: number,
 ): void {
-  const current = readObserved(db, providerId, endpoint);
-  const next: ObservedUsage = {
-    count: (current?.count ?? 0) + 1,
-    first_at: current?.first_at ?? now,
-    last_at: now,
-  };
-  db.writeMeta(key(providerId, endpoint), JSON.stringify(next));
+  // Read-modify-write under BEGIN IMMEDIATE: two processes finishing a call at the same moment
+  // must not each write count+1 from the same starting value.
+  db.transaction(() => {
+    const current = readObserved(db, providerId, endpoint);
+    const next: ObservedUsage = {
+      count: (current?.count ?? 0) + 1,
+      first_at: current?.first_at ?? now,
+      last_at: now,
+    };
+    db.writeMeta(key(providerId, endpoint), JSON.stringify(next));
+  });
 }
 
 /** Read the observed counters; null means this endpoint has never been called. */

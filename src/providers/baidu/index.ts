@@ -23,7 +23,7 @@
 import type { AdapterContext, AdapterOutcome, InformationDocument, ProviderAdapter, ProviderInit, SearchHit } from '../types.js';
 import { interpret, parseJson, request } from '../http.js';
 import { getContent, searchVideo } from './encyclopedia.js';
-import { lemmaIdFromUrl, parseBaikeUrl } from './target.js';
+import { parseBaikeUrl } from './target.js';
 import { bodySuggestsQuota, classifyParseFailure } from '../../errors/classify.js';
 import { redact } from '../../errors/redact.js';
 
@@ -181,8 +181,10 @@ export const baiduAdapter: ProviderAdapter = {
 
     const data = outcome.data as { lemma_title?: unknown; url?: unknown; abstract_plain?: unknown; summary?: unknown; lemma_desc?: unknown };
     if (target.searchType === 'lemmaId') {
-      if (lemmaIdFromUrl(data.url) !== target.searchKey) {
-        return { ok: false, classification: { kind: 'our_problem', evidence: 'returned lemma id does not match the requested page' } };
+      // The trailing number alone proves nothing: the page must be a Baike /item/ URL for that id.
+      const returned = typeof data.url === 'string' ? parseBaikeUrl(data.url) : null;
+      if (returned === null || returned.searchType !== 'lemmaId' || returned.searchKey !== target.searchKey) {
+        return { ok: false, classification: { kind: 'our_problem', evidence: 'returned lemma URL is not the requested page' } };
       }
     } else if (typeof data.lemma_title === 'string' && data.lemma_title !== target.searchKey) {
       return { ok: false, classification: { kind: 'our_problem', evidence: 'returned lemma title does not match the requested page' } };

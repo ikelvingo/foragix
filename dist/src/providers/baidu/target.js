@@ -33,17 +33,4 @@ export function parseBaikeUrl(raw) {
         return null;
     return { searchType: 'lemmaTitle', searchKey: name };
 }
-/** The numeric id inside a lemma response's own `url`, used to prove the answer is the requested sense. */
-export function lemmaIdFromUrl(value) {
-    if (typeof value !== 'string')
-        return null;
-    try {
-        const parts = new URL(value).pathname.split('/').filter((part) => part !== '');
-        const last = parts[parts.length - 1];
-        return last !== undefined && /^[0-9]+$/.test(last) ? last : null;
-    }
-    catch {
-        return null;
-    }
-}
 //# sourceMappingURL=target.js.map

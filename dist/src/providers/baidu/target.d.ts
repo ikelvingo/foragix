@@ -11,5 +11,3 @@ export interface LemmaTarget {
 }
 /** `https://baike.baidu.com/item/<name>[/<numeric id>]`; https only, no credentials, no lookalike host. */
 export declare function parseBaikeUrl(raw: string): LemmaTarget | null;
-/** The numeric id inside a lemma response's own `url`, used to prove the answer is the requested sense. */
-export declare function lemmaIdFromUrl(value: unknown): string | null;
