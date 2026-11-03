@@ -45,11 +45,36 @@ if (!existsSync(entry)) {
     }
   });
 
+  let selfHealed = false;
   try {
     const { runCli } = await import(entry);
     process.exitCode = await runCli(process.argv.slice(2));
   } catch (err) {
-    const raw = err instanceof Error ? err.message : String(err);
-    fail('failed to start', 'the skill may be incomplete; reinstall it', raw.split('\n')[0]);
+    // The single runtime dependency (`yaml`) missing from an installed copy is the one
+    // recoverable start-up failure: bootstrap it once in place, then start again.
+    if (/Cannot find package ['"]yaml['"]/.test(String(err))) {
+      try {
+        // A network failure stays the honest failure the fail() branch reports; nothing is hidden.
+        // ESM caches a failed resolution for this run, so the retry happens in a fresh process.
+        const { spawnSync, execSync } = await import('node:child_process');
+        process.stderr.write('foragix: installing the single runtime dependency (yaml)…\n');
+        execSync('npm install --omit=dev --no-audit --no-fund', {
+          cwd: join(here, '..'),
+          stdio: ['ignore', 'ignore', 'ignore'],
+        });
+        const rerun = spawnSync(process.execPath, [join(here, 'foragix.mjs'), ...process.argv.slice(2)], {
+          stdio: 'inherit',
+          cwd: join(here, '..'),
+        });
+        process.exitCode = rerun.status ?? 1;
+        selfHealed = true;
+      } catch {
+        /* fall through to the start-up failure below */
+      }
+    }
+    if (!selfHealed) {
+      const raw = err instanceof Error ? err.message : String(err);
+      fail('failed to start', 'the skill may be incomplete; reinstall it', raw.split('\n')[0]);
+    }
   }
 }
