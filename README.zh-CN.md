@@ -10,7 +10,7 @@ foragix 是给 AI agent 用的网页搜索与正文抓取工具：把 19 家供�
 npx skills add ikelvingo/foragix -g
 export TAVILY_API_KEY=<你的key>
 ```
-装好后 agent 按 `SKILL.md` 直接用；`status` 可随时查看装没装好、缺不缺 key。
+装好后 agent 按 `SKILL.md` 直接用；`status` 可随时查看装没装好、缺不缺 key。从 git 直接拷来的安装不用手工装依赖：首次运行会自动补上唯一的生产依赖（`yaml`）。
 
 ## 给 key 的方式（优先级从高到低）
 
