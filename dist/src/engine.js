@@ -2,6 +2,8 @@ import { BIT, decodeReasons } from './db/bits.js';
 import { dayKey, isValidTimezone, monthKey, DEFAULT_TIMEZONE } from './db/period.js';
 import { applyResets } from './state/machine.js';
 import { planSelection } from './routing/select.js';
+import { preferredFetchProvider } from './routing/targets.js';
+import { recordObserved } from './state/usage.js';
 import { backoffMs, clampCooldown } from './errors/classify.js';
 import { describeError, redact } from './errors/redact.js';
 export class Engine {
@@ -348,7 +350,7 @@ export class Engine {
     // ---------------------------------------------------------------------------
     // Calls
     // ---------------------------------------------------------------------------
-    async attempt(capability, call) {
+    async attempt(capability, call, policy) {
         // Reset. A failure means this provider's state is untrustworthy for this round → do not call it (fail-closed)
         let failed;
         let candidates;
@@ -363,6 +365,7 @@ export class Engine {
         const plan = planSelection(candidates, capability);
         const attempted = [];
         let storageErrors = 0;
+        let unmatched = 0;
         // Every candidate failed on storage access: go straight to fail-closed.
         if (candidates.length === 0 && failed.size > 0) {
             return this.storageFailure(capability, `state read/write failed for ${failed.size} providers, handled as fail-closed`);
@@ -370,7 +373,13 @@ export class Engine {
         if (plan.noneWithCapability) {
             return this.buildFailure('config_error', capability, attempted, undefined);
         }
-        for (const candidate of plan.ordered) {
+        const ordered = policy?.preferredId === undefined ? plan.ordered : [
+            ...plan.ordered.filter((candidate) => candidate.providerId === policy.preferredId),
+            ...plan.ordered.filter((candidate) => candidate.providerId !== policy.preferredId),
+        ];
+        for (const candidate of ordered) {
+            if (policy?.allowed !== undefined && !policy.allowed(candidate.providerId))
+                continue;
             const provider = this.deps.config.providers.find((p) => p.id === candidate.providerId);
             const adapter = this.deps.adapters.get(candidate.providerId);
             if (provider === undefined || adapter === undefined)
@@ -428,7 +437,11 @@ export class Engine {
             const outcome = await this.callSafely(candidate.providerId, provider, adapter, capability, call);
             if (outcome.ok) {
                 try {
-                    this.applySuccess(candidate.providerId, adapter, provider.account, capability, outcome.usage, periods);
+                    // A specialised endpoint meters on its own plan; the shared provider counter would be wrong.
+                    const observed = policy?.observedFor?.(candidate.providerId) ?? null;
+                    this.applySuccess(candidate.providerId, adapter, provider.account, capability, observed === null ? outcome.usage : 0, periods);
+                    if (observed !== null)
+                        recordObserved(this.deps.db, candidate.providerId, observed, this.deps.now());
                 }
                 catch (err) {
                     // State could not be persisted: fail closed and discard the result rather than return it.
@@ -438,7 +451,12 @@ export class Engine {
                     });
                     return this.storageFailure(capability, `failed to write usage state, result discarded (fail-closed): ${describeError(err)}`);
                 }
-                return { ok: true, provider: candidate.providerId, data: outcome.data };
+                const accepted = policy?.accept === undefined ? outcome.data : policy.accept(outcome.data);
+                if (accepted === null) {
+                    unmatched += 1;
+                    continue;
+                }
+                return { ok: true, provider: candidate.providerId, data: accepted };
             }
             try {
                 await this.applyFailure(candidate.providerId, outcome.classification, adapter.init(provider.account).quotaPeriod, provider, adapter);
@@ -456,6 +474,10 @@ export class Engine {
         // A storage failure must not be reported as a config problem.
         if (attempted.length === 0 && storageErrors > 0) {
             return this.storageFailure(capability, `state read failed for ${storageErrors} providers, handled as fail-closed`);
+        }
+        if (unmatched > 0) {
+            const reason = attempted.length > 0 || storageErrors > 0 ? 'partial_results' : 'no_match';
+            return this.buildFailure(reason, capability, attempted, 'no matching content found');
         }
         const allTransient = attempted.length > 0 &&
             attempted.every((a) => a.classification.kind === 'transient' || a.classification.kind === 'rate_limited_short');
@@ -603,23 +625,81 @@ export class Engine {
     // Public entry points
     // ---------------------------------------------------------------------------
     async search(req) {
+        const sites = [...req.query.matchAll(/(?:^|\s)site:([^\s]+)/gi)].map((match) => (match[1] ?? '').toLowerCase());
+        const restricted = req.site === 'zhihu' || sites.includes('zhihu.com');
+        if (restricted && sites.some((site) => site !== 'zhihu.com')) {
+            return this.buildFailure('config_error', 'search', [], 'conflicting site restrictions');
+        }
         const result = await this.attempt('search', async (ctx, adapter) => {
             if (adapter.search === undefined) {
                 return { ok: false, classification: { kind: 'our_problem', evidence: 'adapter does not implement search' } };
             }
-            return adapter.search(ctx, req);
-        });
+            if (!restricted)
+                return adapter.search(ctx, req);
+            const query = req.query.replace(/(?:^|\s)site:zhihu\.com(?=\s|$)/gi, ' ').trim();
+            return adapter.search(ctx, {
+                ...req,
+                query: adapter.id === 'zhihu' ? query : `${query} site:zhihu.com`,
+                site: 'zhihu',
+            });
+        }, restricted ? {
+            preferredId: 'zhihu',
+            accept: (hits) => {
+                const valid = hits.filter((hit) => {
+                    try {
+                        const url = new URL(hit.url);
+                        const host = url.hostname.toLowerCase();
+                        return (url.protocol === 'https:' || url.protocol === 'http:') && url.username === '' && url.password === '' &&
+                            (host === 'zhihu.com' || host.endsWith('.zhihu.com'));
+                    }
+                    catch {
+                        return false;
+                    }
+                });
+                return valid.length === 0 ? null : valid;
+            },
+        } : undefined);
         if (!result.ok)
             return result;
         return { ok: true, data: result.data };
     }
+    async information(req) {
+        if ((req.kind === 'ruyi' && req.source === 'baidu') ||
+            ((req.kind === 'encyclopedia' || req.kind === 'video') && req.source === 'doubao')) {
+            return this.buildFailure('config_error', 'information', [], 'kind conflicts with source');
+        }
+        const target = req.source ?? (req.kind === 'encyclopedia' || req.kind === 'video' || /(?:百度百科|百科词条|秒懂百科)/.test(req.query) ? 'baidu' : 'doubao');
+        const videoIntent = req.kind === 'video' || /秒懂百科|秒懂视频/.test(req.query);
+        const result = await this.attempt('information', async (ctx, adapter) => {
+            if (adapter.information === undefined) {
+                return { ok: false, classification: { kind: 'our_problem', evidence: 'adapter does not implement information' } };
+            }
+            return adapter.information(ctx, req);
+        }, {
+            allowed: (id) => id === target,
+            accept: (data) => data.type === 'card' && Array.isArray(data.data) && data.data.length === 0 ? null : data,
+            // The Baike tools are metered apart from Baidu AI search; Doubao shares its monthly pool.
+            observedFor: (id) => (id === 'baidu' ? (videoIntent ? 'video' : 'encyclopedia') : null),
+        });
+        if (result.ok)
+            return { ok: true, data: result.data };
+        if (result.reason === 'state_store_error')
+            return result;
+        const fallback = await this.search({ query: req.query });
+        if (!fallback.ok)
+            return fallback;
+        if (fallback.data.length === 0)
+            return this.buildFailure('no_match', 'information', [], 'no information found');
+        return { ok: true, data: { type: 'web-fallback', source: 'search', data: fallback.data } };
+    }
     async fetch(req) {
+        const preferredId = preferredFetchProvider(req.url) ?? undefined;
         const result = await this.attempt('fetch', async (ctx, adapter) => {
             if (adapter.fetch === undefined) {
                 return { ok: false, classification: { kind: 'our_problem', evidence: 'adapter does not implement fetch' } };
             }
             return adapter.fetch(ctx, req);
-        });
+        }, { ...(preferredId === undefined ? {} : { preferredId }), observedFor: (id) => (id === 'zhihu' ? 'content' : null) });
         if (!result.ok)
             return result;
         return { ok: true, data: result.data };

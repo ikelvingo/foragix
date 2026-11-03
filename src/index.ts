@@ -14,7 +14,7 @@ import type { Config } from './config/types.js';
 import { loadCredentials, type CredentialView } from './credentials/load.js';
 import { Engine, type FailureReport, type ProviderReport } from './engine.js';
 import { ADAPTERS, createSchemaLookup } from './providers/registry.js';
-import type { FetchDocument, ProviderAdapter, SearchHit } from './providers/types.js';
+import type { FetchDocument, InformationDocument, InformationRequest, ProviderAdapter, SearchHit } from './providers/types.js';
 import { ensureDatabase } from './runtime/db.js';
 import { findSkillRoot } from './runtime/root.js';
 
@@ -43,8 +43,9 @@ export interface ForagixOptions {
 
 export interface Foragix {
   readonly config: Config;
-  search(req: { query: string; maxResults?: number }): Promise<SearchResult>;
+  search(req: { query: string; maxResults?: number; site?: 'zhihu' }): Promise<SearchResult>;
   fetch(req: { url: string }): Promise<FetchResult>;
+  information(req: InformationRequest): Promise<InformationResult>;
   /** Read-only status. For the LLM, not a CLI for humans. */
   status(options?: { onlyProblems?: boolean }): ProviderReport[];
   close(): void;
@@ -53,6 +54,8 @@ export interface Foragix {
 // Success carries the results only (config format §10.1); provider selection stays internal.
 export type SearchResult = { ok: true; data: readonly SearchHit[] } | FailureReport;
 export type FetchResult = { ok: true; data: FetchDocument } | FailureReport;
+export type InformationResult = { ok: true; data: InformationDocument } | FailureReport;
+export type { InformationRequest, InformationDocument };
 
 export type { ProviderReport, FailureReport };
 
@@ -102,6 +105,7 @@ export function createForagix(options: ForagixOptions): Foragix {
     config,
     search: (req) => engine.search(req),
     fetch: (req) => engine.fetch(req),
+    information: (req) => engine.information(req),
     status: (opts) => engine.status(opts?.onlyProblems ?? false),
     close: () => handle.db.close(),
   };

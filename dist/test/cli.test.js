@@ -78,6 +78,103 @@ function newTempDir(prefix) {
     mkdirSync(base, { recursive: true });
     return mkdtempSync(join(base, prefix));
 }
+test('information command forwards a query to the information API', async () => {
+    const box = sandbox();
+    try {
+        let stdout = '';
+        let received;
+        const code = await runCli(['information', '--query', '北京天气', '--data-dir', box.dataDir], {
+            env: { HOME: box.dir },
+            stdout: (s) => { stdout += s; },
+            stderr: () => { },
+            createForagix: () => ({
+                information: async (req) => { received = req; return { ok: true, data: { type: 'card', source: 'doubao', data: {} } }; },
+                close: () => { },
+            }),
+        });
+        assert.equal(code, EXIT_OK);
+        assert.deepEqual(received, { query: '北京天气' });
+        assert.equal(JSON.parse(stdout).ok, true);
+    }
+    finally {
+        box.cleanup();
+    }
+});
+test('information flags override JSON kind and source', async () => {
+    const box = sandbox();
+    try {
+        let received;
+        const code = await runCli(['information', '--input-json', '--kind', 'video', '--source', 'baidu', '--data-dir', box.dataDir], {
+            env: { HOME: box.dir }, stdinIsTty: false,
+            readStdin: async () => JSON.stringify({ query: '百科', kind: 'ruyi', source: 'doubao' }),
+            stdout: () => { }, stderr: () => { },
+            createForagix: () => ({
+                information: async (req) => { received = req; return { ok: true, data: { type: 'video', source: 'baidu', data: {} } }; },
+                close: () => { },
+            }),
+        });
+        assert.equal(code, EXIT_OK);
+        assert.deepEqual(received, { query: '百科', kind: 'video', source: 'baidu' });
+    }
+    finally {
+        box.cleanup();
+    }
+});
+test('information rejects conflicting source and kind before constructing an app', async () => {
+    const box = sandbox();
+    try {
+        let constructed = false;
+        let stdout = '';
+        const code = await runCli(['information', '--query', '天气', '--kind', 'ruyi', '--source', 'baidu', '--data-dir', box.dataDir], {
+            env: { HOME: box.dir }, stdout: (s) => { stdout += s; }, stderr: () => { },
+            createForagix: () => { constructed = true; throw new Error('must not construct'); },
+        });
+        assert.equal(code, EXIT_REFUSED);
+        assert.equal(JSON.parse(stdout).code, 'usage_error');
+        assert.equal(constructed, false);
+    }
+    finally {
+        box.cleanup();
+    }
+});
+test('kind and source are rejected for commands other than information', async () => {
+    const box = sandbox();
+    try {
+        for (const argv of [
+            ['search', '--query', 'q', '--kind', 'video'],
+            ['fetch', '--url', 'https://example.com', '--source', 'baidu'],
+            ['status', '--kind', 'auto'],
+        ]) {
+            let constructed = false;
+            let stdout = '';
+            const code = await runCli([...argv, '--data-dir', box.dataDir], {
+                env: { HOME: box.dir }, stdout: (s) => { stdout += s; }, stderr: () => { },
+                createForagix: () => { constructed = true; throw new Error('must not construct'); },
+            });
+            assert.equal(code, EXIT_REFUSED);
+            assert.equal(JSON.parse(stdout).code, 'usage_error');
+            assert.equal(constructed, false);
+        }
+    }
+    finally {
+        box.cleanup();
+    }
+});
+test('search site flag forwards the explicit Zhihu constraint', async () => {
+    const box = sandbox();
+    try {
+        let received;
+        const code = await runCli(['search', '--query', '经验', '--site', 'zhihu', '--data-dir', box.dataDir], {
+            env: { HOME: box.dir }, stdout: () => { }, stderr: () => { },
+            createForagix: () => ({ search: async (req) => { received = req; return { ok: true, data: [] }; }, close: () => { } }),
+        });
+        assert.equal(code, EXIT_OK);
+        assert.deepEqual(received, { query: '经验', site: 'zhihu' });
+    }
+    finally {
+        box.cleanup();
+    }
+});
 test('status succeeds offline and reports the provider as unusable without credentials', async () => {
     const box = sandbox();
     try {

@@ -122,7 +122,7 @@ test('baidu daily free quota is 100 calls, Beijing-time reset, paid-gated', () =
     assert.equal(init.quotaPeriod, 'day');
     assert.equal(init.dayLimit, 100);
     assert.equal(init.resetTimezone, 'Asia/Shanghai');
-    assert.deepEqual(baiduAdapter.capabilities, ['search']);
+    assert.deepEqual(baiduAdapter.capabilities, ['search', 'information', 'fetch']);
 });
 // ---------------------------------------------------------------------------
 // Zhipu

@@ -1,8 +1,10 @@
 import { interpret, parseJson, request } from '../http.js';
 import { classifyParseFailure } from '../../errors/classify.js';
 import { redact } from '../../errors/redact.js';
+import { htmlToText, parseZhihuUrl, sameZhihuContent } from './target.js';
 const CREDENTIAL = 'ZHIHU_API_KEY';
 const BASE_URL = 'https://developer.zhihu.com/api/v1/content';
+const BASE_USER = 'https://developer.zhihu.com/api/v1/user';
 const MAX_COUNT = 20;
 function authHeaders(ctx) {
     const key = ctx.credentials.get(CREDENTIAL);
@@ -13,7 +15,7 @@ function authHeaders(ctx) {
 }
 export const zhihuAdapter = {
     id: 'zhihu',
-    capabilities: ['search'],
+    capabilities: ['search', 'fetch'],
     schema: {
         id: 'zhihu',
         requiresCredentials: true,
@@ -46,8 +48,9 @@ export const zhihuAdapter = {
     },
     async search(ctx, req) {
         const account = ctx.config.account;
-        const kind = account['db'] === 'global' ? 'global_search' : 'zhihu_search';
-        const count = req.maxResults === undefined ? undefined : Math.min(MAX_COUNT, Math.max(1, req.maxResults));
+        const kind = req.site === 'zhihu' || account['db'] !== 'global' ? 'zhihu_search' : 'global_search';
+        const countLimit = kind === 'zhihu_search' ? 10 : MAX_COUNT;
+        const count = req.maxResults === undefined ? undefined : Math.min(countLimit, Math.max(1, req.maxResults));
         const url = new URL(`${BASE_URL}/${kind}`);
         url.searchParams.set('Query', req.query);
         if (count !== undefined)
@@ -93,6 +96,57 @@ export const zhihuAdapter = {
             ...(typeof r.ContentText === 'string' ? { snippet: r.ContentText.replaceAll(/<\/?em>/g, '') } : {}),
         }));
         return { ok: true, data: hits, usage: this.usageOf?.('search', ctx.config.account) ?? 1 };
+    },
+    /**
+     * Source-preferred fetch for Zhihu content URLs.
+     *
+     * The official `user/content_detail` endpoint returns the **full text of the credential owner's own
+     * published content** only; other people's content answers an invalid-parameter code. Every such
+     * case fails here so the engine falls back to the ordinary fetch chain instead of returning a
+     * search snippet as if it were the article.
+     */
+    async fetch(ctx, req) {
+        const canonical = parseZhihuUrl(req.url);
+        if (canonical === null) {
+            return { ok: false, classification: { kind: 'our_problem', evidence: 'not a supported Zhihu content URL' } };
+        }
+        const url = new URL(`${BASE_USER}/content_detail`);
+        url.searchParams.set('ContentUrl', canonical);
+        const result = await request(ctx.fetchImpl, url.toString(), { method: 'GET', headers: authHeaders(ctx) });
+        if (!result.ok)
+            return result;
+        const verdict = interpret(result.data, this.errorHints, ctx.now());
+        if (verdict.kind !== 'success')
+            return { ok: false, classification: verdict };
+        const parsed = parseJson(result.data.body);
+        if (parsed === null)
+            return { ok: false, classification: classifyParseFailure('zhihu content body is not JSON') };
+        // 10001 covers invalid, unavailable and non-owner alike; it never discloses which.
+        if (typeof parsed.Code === 'number' && parsed.Code !== 0) {
+            return {
+                ok: false,
+                classification: {
+                    kind: 'our_problem',
+                    evidence: `zhihu content Code=${parsed.Code} (${redact(parsed.Message ?? 'no message', 80)})`,
+                },
+            };
+        }
+        if (!sameZhihuContent(parsed.Data?.Url, canonical)) {
+            return { ok: false, classification: { kind: 'our_problem', evidence: 'returned Zhihu content is not the requested one' } };
+        }
+        const body = parsed.Data?.Body;
+        if (typeof body !== 'string' || htmlToText(body) === '') {
+            return { ok: false, classification: { kind: 'our_problem', evidence: 'zhihu content has no readable body' } };
+        }
+        return {
+            ok: true,
+            data: {
+                url: req.url,
+                ...(typeof parsed.Data?.Title === 'string' ? { title: parsed.Data.Title } : {}),
+                content: htmlToText(body),
+            },
+            usage: 1,
+        };
     },
 };
 //# sourceMappingURL=index.js.map

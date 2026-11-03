@@ -55,6 +55,7 @@ export function createForagix(options) {
         config,
         search: (req) => engine.search(req),
         fetch: (req) => engine.fetch(req),
+        information: (req) => engine.information(req),
         status: (opts) => engine.status(opts?.onlyProblems ?? false),
         close: () => handle.db.close(),
     };

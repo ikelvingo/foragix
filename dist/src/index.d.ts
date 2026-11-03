@@ -1,6 +1,6 @@
 import type { Config } from './config/types.js';
 import { type FailureReport, type ProviderReport } from './engine.js';
-import type { FetchDocument, ProviderAdapter, SearchHit } from './providers/types.js';
+import type { FetchDocument, InformationDocument, InformationRequest, ProviderAdapter, SearchHit } from './providers/types.js';
 export interface ForagixOptions {
     /**
      * Config file path (YAML). **null means use the built-in defaults**, which enable every
@@ -25,10 +25,12 @@ export interface Foragix {
     search(req: {
         query: string;
         maxResults?: number;
+        site?: 'zhihu';
     }): Promise<SearchResult>;
     fetch(req: {
         url: string;
     }): Promise<FetchResult>;
+    information(req: InformationRequest): Promise<InformationResult>;
     /** Read-only status. For the LLM, not a CLI for humans. */
     status(options?: {
         onlyProblems?: boolean;
@@ -43,6 +45,11 @@ export type FetchResult = {
     ok: true;
     data: FetchDocument;
 } | FailureReport;
+export type InformationResult = {
+    ok: true;
+    data: InformationDocument;
+} | FailureReport;
+export type { InformationRequest, InformationDocument };
 export type { ProviderReport, FailureReport };
 /**
  * Create a foragix instance.

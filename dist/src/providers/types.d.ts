@@ -9,7 +9,7 @@
 import type { CredentialView } from '../credentials/load.js';
 import type { ProviderConfig, ProviderSchema } from '../config/types.js';
 import type { Classification, ProviderErrorHints } from '../errors/classify.js';
-export type Capability = 'search' | 'fetch';
+export type Capability = 'search' | 'fetch' | 'information';
 /** The product of `init`: this provider's billing semantics and the seeded preset values of each tier. */
 export interface ProviderInit {
     /**
@@ -39,6 +39,19 @@ export interface ProviderInit {
 export interface SearchRequest {
     readonly query: string;
     readonly maxResults?: number;
+    readonly site?: 'zhihu';
+}
+export interface InformationRequest {
+    readonly query: string;
+    readonly kind?: 'auto' | 'ruyi' | 'encyclopedia' | 'video';
+    readonly source?: 'doubao' | 'baidu';
+}
+export interface InformationDocument {
+    readonly type: 'card' | 'ruyi' | 'encyclopedia' | 'video' | 'web-fallback';
+    readonly source: string;
+    readonly data: unknown;
+    readonly url?: string;
+    readonly timestamp?: string;
 }
 export interface FetchRequest {
     readonly url: string;
@@ -99,6 +112,7 @@ export interface ProviderAdapter {
     probeReset?(ctx: AdapterContext): Promise<number | null>;
     search?(ctx: AdapterContext, req: SearchRequest): Promise<AdapterOutcome<SearchHit[]>>;
     fetch?(ctx: AdapterContext, req: FetchRequest): Promise<AdapterOutcome<FetchDocument>>;
+    information?(ctx: AdapterContext, req: InformationRequest): Promise<AdapterOutcome<InformationDocument>>;
     /**
      * Number of billing units consumed by one successful call.
      * Defaults to 1, but not every vendor bills per request (e.g. per result or per page);

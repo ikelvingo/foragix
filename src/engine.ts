@@ -13,6 +13,8 @@ import { BIT, decodeReasons, type Reason } from './db/bits.js';
 import { dayKey, isValidTimezone, monthKey, DEFAULT_TIMEZONE } from './db/period.js';
 import { applyResets } from './state/machine.js';
 import { planSelection, type Candidate } from './routing/select.js';
+import { preferredFetchProvider } from './routing/targets.js';
+import { recordObserved, type ObservedEndpoint } from './state/usage.js';
 import type { ResetOutcome } from './state/machine.js';
 import type { Config, IsolatedProvider, ProviderConfig } from './config/types.js';
 import type { CredentialView } from './credentials/load.js';
@@ -23,6 +25,8 @@ import type {
   AdapterOutcome,
   Capability,
   FetchDocument,
+  InformationDocument,
+  InformationRequest,
   ProviderAdapter,
   SearchHit,
 } from './providers/types.js';
@@ -31,7 +35,9 @@ export type FailureReason =
   | 'no_provider_available'
   | 'all_transient'
   | 'config_error'
-  | 'state_store_error';
+  | 'state_store_error'
+  | 'no_match'
+  | 'partial_results';
 
 export interface ProviderReport {
   readonly id: string;
@@ -477,6 +483,13 @@ export class Engine {
   private async attempt<T>(
     capability: Capability,
     call: (ctx: AdapterContext, adapter: ProviderAdapter) => Promise<AdapterOutcome<T>>,
+    policy?: {
+      readonly preferredId?: string;
+      readonly accept?: (data: T) => T | null;
+      readonly allowed?: (providerId: string) => boolean;
+      /** Endpoint whose usage this call must be observed under, or null for ordinary quota accounting. */
+      readonly observedFor?: (providerId: string) => ObservedEndpoint | null;
+    },
   ): Promise<{ ok: true; provider: string; data: T } | FailureReport> {
     // Reset. A failure means this provider's state is untrustworthy for this round → do not call it (fail-closed)
     let failed: Set<string>;
@@ -492,6 +505,7 @@ export class Engine {
     const plan = planSelection(candidates, capability);
     const attempted: Array<{ providerId: string; classification: Classification }> = [];
     let storageErrors = 0;
+    let unmatched = 0;
 
     // Every candidate failed on storage access: go straight to fail-closed.
     if (candidates.length === 0 && failed.size > 0) {
@@ -502,7 +516,12 @@ export class Engine {
       return this.buildFailure('config_error', capability, attempted, undefined);
     }
 
-    for (const candidate of plan.ordered) {
+    const ordered = policy?.preferredId === undefined ? plan.ordered : [
+      ...plan.ordered.filter((candidate) => candidate.providerId === policy.preferredId),
+      ...plan.ordered.filter((candidate) => candidate.providerId !== policy.preferredId),
+    ];
+    for (const candidate of ordered) {
+      if (policy?.allowed !== undefined && !policy.allowed(candidate.providerId)) continue;
       const provider = this.deps.config.providers.find((p) => p.id === candidate.providerId);
       const adapter = this.deps.adapters.get(candidate.providerId);
       if (provider === undefined || adapter === undefined) continue;
@@ -564,7 +583,10 @@ export class Engine {
       const outcome = await this.callSafely(candidate.providerId, provider, adapter, capability, call);
 
       if (outcome.ok) {        try {
-          this.applySuccess(candidate.providerId, adapter, provider.account, capability, outcome.usage, periods);
+          // A specialised endpoint meters on its own plan; the shared provider counter would be wrong.
+          const observed = policy?.observedFor?.(candidate.providerId) ?? null;
+          this.applySuccess(candidate.providerId, adapter, provider.account, capability, observed === null ? outcome.usage : 0, periods);
+          if (observed !== null) recordObserved(this.deps.db, candidate.providerId, observed, this.deps.now());
         } catch (err) {
           // State could not be persisted: fail closed and discard the result rather than return it.
           this.deps.onDiagnostic?.('state_write_failed', {
@@ -576,7 +598,12 @@ export class Engine {
             `failed to write usage state, result discarded (fail-closed): ${describeError(err)}`,
           );
         }
-        return { ok: true, provider: candidate.providerId, data: outcome.data };
+        const accepted = policy?.accept === undefined ? outcome.data : policy.accept(outcome.data);
+        if (accepted === null) {
+          unmatched += 1;
+          continue;
+        }
+        return { ok: true, provider: candidate.providerId, data: accepted };
       }
 
       try {
@@ -598,6 +625,11 @@ export class Engine {
     // A storage failure must not be reported as a config problem.
     if (attempted.length === 0 && storageErrors > 0) {
       return this.storageFailure(capability, `state read failed for ${storageErrors} providers, handled as fail-closed`);
+    }
+
+    if (unmatched > 0) {
+      const reason = attempted.length > 0 || storageErrors > 0 ? 'partial_results' : 'no_match';
+      return this.buildFailure(reason, capability, attempted, 'no matching content found');
     }
 
     const allTransient =
@@ -763,24 +795,75 @@ export class Engine {
   // Public entry points
   // ---------------------------------------------------------------------------
 
-  async search(req: { query: string; maxResults?: number }): Promise<SearchResult> {
+  async search(req: { query: string; maxResults?: number; site?: 'zhihu' }): Promise<SearchResult> {
+    const sites = [...req.query.matchAll(/(?:^|\s)site:([^\s]+)/gi)].map((match) => (match[1] ?? '').toLowerCase());
+    const restricted = req.site === 'zhihu' || sites.includes('zhihu.com');
+    if (restricted && sites.some((site) => site !== 'zhihu.com')) {
+      return this.buildFailure('config_error', 'search', [], 'conflicting site restrictions');
+    }
     const result = await this.attempt<readonly SearchHit[]>('search', async (ctx, adapter) => {
       if (adapter.search === undefined) {
         return { ok: false, classification: { kind: 'our_problem', evidence: 'adapter does not implement search' } };
       }
-      return adapter.search(ctx, req);
-    });
+      if (!restricted) return adapter.search(ctx, req);
+      const query = req.query.replace(/(?:^|\s)site:zhihu\.com(?=\s|$)/gi, ' ').trim();
+      return adapter.search(ctx, {
+        ...req,
+        query: adapter.id === 'zhihu' ? query : `${query} site:zhihu.com`,
+        site: 'zhihu',
+      });
+    }, restricted ? {
+      preferredId: 'zhihu',
+      accept: (hits) => {
+        const valid = hits.filter((hit) => {
+          try {
+            const url = new URL(hit.url);
+            const host = url.hostname.toLowerCase();
+            return (url.protocol === 'https:' || url.protocol === 'http:') && url.username === '' && url.password === '' &&
+              (host === 'zhihu.com' || host.endsWith('.zhihu.com'));
+          } catch { return false; }
+        });
+        return valid.length === 0 ? null : valid;
+      },
+    } : undefined);
     if (!result.ok) return result;
     return { ok: true, data: result.data };
   }
 
+  async information(req: InformationRequest): Promise<{ ok: true; data: InformationDocument } | FailureReport> {
+    if ((req.kind === 'ruyi' && req.source === 'baidu') ||
+        ((req.kind === 'encyclopedia' || req.kind === 'video') && req.source === 'doubao')) {
+      return this.buildFailure('config_error', 'information', [], 'kind conflicts with source');
+    }
+    const target = req.source ?? (req.kind === 'encyclopedia' || req.kind === 'video' || /(?:百度百科|百科词条|秒懂百科)/.test(req.query) ? 'baidu' : 'doubao');
+    const videoIntent = req.kind === 'video' || /秒懂百科|秒懂视频/.test(req.query);
+    const result = await this.attempt<InformationDocument>('information', async (ctx, adapter) => {
+      if (adapter.information === undefined) {
+        return { ok: false, classification: { kind: 'our_problem', evidence: 'adapter does not implement information' } };
+      }
+      return adapter.information(ctx, req);
+    }, {
+      allowed: (id) => id === target,
+      accept: (data) => data.type === 'card' && Array.isArray(data.data) && data.data.length === 0 ? null : data,
+      // The Baike tools are metered apart from Baidu AI search; Doubao shares its monthly pool.
+      observedFor: (id) => (id === 'baidu' ? (videoIntent ? 'video' : 'encyclopedia') : null),
+    });
+    if (result.ok) return { ok: true, data: result.data };
+    if (result.reason === 'state_store_error') return result;
+    const fallback = await this.search({ query: req.query });
+    if (!fallback.ok) return fallback;
+    if (fallback.data.length === 0) return this.buildFailure('no_match', 'information', [], 'no information found');
+    return { ok: true, data: { type: 'web-fallback', source: 'search', data: fallback.data } };
+  }
+
   async fetch(req: { url: string }): Promise<FetchResult> {
+    const preferredId = preferredFetchProvider(req.url) ?? undefined;
     const result = await this.attempt<FetchDocument>('fetch', async (ctx, adapter) => {
       if (adapter.fetch === undefined) {
         return { ok: false, classification: { kind: 'our_problem', evidence: 'adapter does not implement fetch' } };
       }
       return adapter.fetch(ctx, req);
-    });
+    }, { ...(preferredId === undefined ? {} : { preferredId }), observedFor: (id) => (id === 'zhihu' ? 'content' : null) });
     if (!result.ok) return result;
     return { ok: true, data: result.data };
   }

@@ -16,7 +16,7 @@
  *    post-paid billing — `canCharge` true (paid gate applies by default), day/month reset
  *    monthly.
  */
-import type { AdapterContext, AdapterOutcome, ProviderAdapter, ProviderInit, SearchHit } from '../types.js';
+import type { AdapterContext, AdapterOutcome, InformationDocument, ProviderAdapter, ProviderInit, SearchHit } from '../types.js';
 import { interpret, parseJson, request } from '../http.js';
 import { classifyParseFailure } from '../../errors/classify.js';
 import { redact } from '../../errors/redact.js';
@@ -43,11 +43,12 @@ interface DoubaoWebResult {
   Content?: string;
   Summary?: string;
   Snippet?: string;
+  RuyiInfo?: unknown;
 }
 
 interface DoubaoCustomResponse {
   ResponseMetadata?: { Error?: { Code?: string; Message?: string } };
-  Result?: { WebResults?: DoubaoWebResult[] };
+  Result?: { WebResults?: DoubaoWebResult[]; CardResults?: unknown[] | null };
 }
 
 function authHeaders(ctx: AdapterContext): Record<string, string> {
@@ -59,7 +60,7 @@ function authHeaders(ctx: AdapterContext): Record<string, string> {
 /** Maps one envelope error to a classification; error text is provider-controlled. */
 function envelopeError(
   err: { Code?: string; Message?: string } | undefined,
-): AdapterOutcome<SearchHit[]> {
+): AdapterOutcome<never> {
   return {
     ok: false,
     classification: {
@@ -71,7 +72,7 @@ function envelopeError(
 
 export const doubaoAdapter: ProviderAdapter = {
   id: 'doubao',
-  capabilities: ['search'],
+  capabilities: ['search', 'information'],
 
   schema: {
     id: 'doubao',
@@ -101,6 +102,26 @@ export const doubaoAdapter: ProviderAdapter = {
 
   usageOf(): number {
     return 1;
+  },
+
+  async information(ctx, req): Promise<AdapterOutcome<InformationDocument>> {
+    const result = await request(ctx.fetchImpl, `${BASE_URL}/web_search`, {
+      method: 'POST', headers: authHeaders(ctx), json: { Query: req.query, SearchType: 'web' },
+    });
+    if (!result.ok) return result;
+    const verdict = interpret(result.data, this.errorHints, ctx.now());
+    if (verdict.kind !== 'success') return { ok: false, classification: verdict };
+    const parsed = parseJson<DoubaoCustomResponse>(result.data.body);
+    if (parsed === null) return { ok: false, classification: classifyParseFailure('doubao information body is not JSON') };
+    if (parsed.ResponseMetadata?.Error !== undefined) return envelopeError(parsed.ResponseMetadata.Error);
+    if (parsed.Result === null || parsed.Result === undefined) {
+      return { ok: false, classification: classifyParseFailure('doubao information body is not a valid result') };
+    }
+    const cards = Array.isArray(parsed.Result.CardResults) ? parsed.Result.CardResults : [];
+    if (cards.length > 0) return { ok: true, data: { type: 'card', source: 'doubao', data: cards }, usage: 1 };
+    const ruyi = (parsed.Result.WebResults ?? []).filter((item) => item?.RuyiInfo != null);
+    if (ruyi.length > 0) return { ok: true, data: { type: 'ruyi', source: 'doubao', data: ruyi }, usage: 1 };
+    return { ok: true, data: { type: 'card', source: 'doubao', data: [] }, usage: 1 };
   },
 
   async search(ctx, req): Promise<AdapterOutcome<SearchHit[]>> {
