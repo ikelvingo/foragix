@@ -10,7 +10,7 @@ English | [简体中文](README.zh-CN.md)
 npx skills add ikelvingo/foragix -g
 export TAVILY_API_KEY=<your key>
 ```
-Once installed, the agent uses it through `SKILL.md`; run `status` any time to check the install and missing keys. A copy straight from git needs no manual `npm install`: the first run bootstraps the single runtime dependency (`yaml`) by itself.
+Once installed, the agent uses it through `SKILL.md`; run `status` any time to check the install and missing keys.
 
 ## Ways to hand over a key (highest priority first)
 
