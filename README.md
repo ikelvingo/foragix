@@ -26,6 +26,9 @@ Once installed, the agent uses it through `SKILL.md`; run `status` any time to c
 
   If the preferred source has no suitable result, the agent tries other available channels and indicates when the result is a fallback. Baike content may be a summary rather than the full entry; Miaodong returns video information, not subtitles. Provider free quotas are counted separately, and exceeding them may incur charges; local usage records do not represent the balance in a provider account.
 
+> [!TIP]
+> Some agents, such as Hermes Agent, provide their own web-search and page-extraction tools. Disable those built-in tools to avoid competing routes and have web-search and page-reading requests go through foragix.
+
 ## Ways to hand over a key (highest priority first)
 
 1. `--credentials <file path>`: use this key file (any file path works; the environment variable `FORAGIX_CREDENTIALS=<file path>` is equivalent); it replaces every way below.
