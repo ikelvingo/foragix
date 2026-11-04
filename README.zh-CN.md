@@ -1,6 +1,6 @@
 # foragix
 
-foragix 是给 AI agent 用的网页搜索与正文抓取工具：把 19 家供应商的免费额度攒成一个池子，谁还有免费额度就先用谁，用完自动换下一家。
+foragix 是给 AI agent 用的网页搜索与正文抓取工具：把 20 家供应商的免费额度攒成一个池子，谁还有免费额度就先用谁，用完自动换下一家。
 
 [English](README.md) | 简体中文
 
@@ -35,32 +35,57 @@ export TAVILY_API_KEY=<你的key>
 
 ## 配置参考
 
-配置文件放在 `~/.foragix/config.yaml`（可选：不写就用内置默认，写了的值覆盖默认）。key 从上面「给 key 的方式」里来，配置文件里永远只写变量名、不写值。
+配置文件放在 `~/.foragix/config.yaml`（可选：不写就用内置默认，写了的值覆盖默认）。key 从上面「给 key 的方式」里来，配置文件里永远只写变量名、不写值。下表列出 20 家供应商各自可选的 `account` 设置；API key 应放在 `credentials` 或环境变量中，不属于 `account`。
 
 ```yaml
 version: 1                     # 只接受 1
 providers:
-  - id: tavily                 # 必需，19 个 id 之一
+  - id: tavily                 # 必需，20 个 id 之一
     enabled: true              # 默认 true
     priority: 30               # 覆盖成 30；不写 = 列表位置 ×10，数值小者先试
     credentials:               # 整段不写 = 用该家自己声明的变量名
       - name: TAVILY_API_KEY   # 只写环境变量名，永不写值
         required: true         # 缺变量时不使用该家
-    account: {}                # 只有 6 家有专属键（8 个 id），其余 11 个 id 留空
+    account: {}                # 可选的服务专属设置，见下表
   - id: minimax
     enabled: true              # 默认关闭，这里显式打开
     account:
       base_url: https://api.minimax.io
 ```
 
-| 服务 | 键 | 取值 | 默认 |
+| 服务 ID | `account` 键 | 填写内容 | 默认值 |
 | --- | --- | --- | --- |
-| `searxng` | `base_url` | 实例地址 | `https://search.ikelvin.space:8443` |
-| `minimax` / `minimax_cn` | `base_url` | `https://api.minimax.io` / `https://api.minimax.cn` | 按 id |
-| `zhipu` / `zhipu_cn` | `base_url` | `https://api.z.ai/api/paas/v4` / `https://open.bigmodel.cn/api/paas/v4` | 按 id |
-| `zhihu` | `db` | `zhihu` / `global` | `zhihu` |
-| `doubao` | `version` | `global` / `custom` | `global` |
-| `brave` | `capped_free` | `true` / `false` | `true`（免费额度建立在绑卡上；`false` 拆掉本地预算闸） |
+| `minimax_cn` | `base_url` | 可选：覆盖 MiniMax 国内 API 地址 | `https://api.minimax.cn` |
+| `keenable` | — | 无专属 `account` 设置 | — |
+| `searxng` | `base_url` | SearXNG 实例地址 | `https://search.ikelvin.space:8443` |
+| `minimax` | `base_url` | 可选：覆盖 MiniMax API 地址 | `https://api.minimax.io` |
+| `tinyfish` | — | 无专属 `account` 设置 | — |
+| `you` | — | 无专属 `account` 设置 | — |
+| `zhihu` | `db` | `zhihu` 调用知乎站内搜索接口；`global` 调用全网搜索接口（`SearchDB=all`） | `zhihu` |
+| `anysearch` | — | 无专属 `account` 设置 | — |
+| `ollama` | — | 无专属 `account` 设置 | — |
+| `linkup` | — | 无专属 `account` 设置 | — |
+| `exa` | — | 无专属 `account` 设置 | — |
+| `metaso` | — | 无专属 `account` 设置 | — |
+| `firecrawl` | — | 无专属 `account` 设置 | — |
+| `tavily` | — | 无专属 `account` 设置 | — |
+| `brave` | `capped_free` | `true` 保留本地免费额度上限；`false` 取消本地上限 | `true` |
+| `doubao` | `version` | `global` 使用 Global Search；`custom` 使用 Custom（火山如意） | `global` |
+| `baidu` | — | 无专属 `account` 设置 | — |
+| `deepseek` | — | 无专属 `account` 设置 | — |
+| `zhipu_cn` | `base_url` | 可选：覆盖智谱国内 API 地址 | `https://open.bigmodel.cn/api/paas/v4` |
+| `zhipu` | `base_url` | 可选：覆盖智谱 API 地址 | `https://api.z.ai/api/paas/v4` |
+
+例如，要让知乎 provider 搜全网，在它的配置中这样设置 `db`：
+
+```yaml
+- id: zhihu
+  account:
+    db: global
+```
+
+不写 `account` 或保留 `account: {}` 都会使用表中的默认值。
+单次搜索显式指定 `site:zhihu` 时，始终调用知乎站内搜索接口，即使 `db` 设置为 `global`。
 
 - 重复 `id` 或顶层未知键：启动直接拒绝。
 - 某一家内部写错（未知键、凭据名不符、取值越界）：只隔离该家，其余照常。
@@ -75,9 +100,10 @@ providers:
 
 | id | 凭据变量 | 默认 |
 | --- | --- | --- |
+| `minimax_cn` | `MINIMAX_API_KEY` | false |
+| `keenable` | `KEENABLE_API_KEY` | true |
 | `searxng` | 无 | true |
 | `minimax` | `MINIMAX_GLOBAL_API_KEY` | false |
-| `minimax_cn` | `MINIMAX_API_KEY` | false |
 | `tinyfish` | `TINYFISH_API_KEY` | true |
 | `you` | `YDC_API_KEY` | true |
 | `zhihu` | `ZHIHU_API_KEY` | true |
@@ -94,6 +120,8 @@ providers:
 | `deepseek` | `DEEPSEEK_API_KEY` | false |
 | `zhipu_cn` | `ZHIPU_API_KEY` | false |
 | `zhipu` | `ZAI_API_KEY` | false |
+
+- `keenable`：每月 100,000 次免费搜索与抓取请求共用额度；免费额度用完后的购买额度由 Keenable 账户决定。详见 [REST API 文档](https://docs.keenable.ai/api-reference)。
 
 ## 已知限制
 - 本地记的用量只是估算，服务商自己的拒绝才算数。

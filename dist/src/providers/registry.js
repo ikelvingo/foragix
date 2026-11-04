@@ -1,6 +1,7 @@
+import { minimaxCnAdapter } from './minimax/index.js';
+import { keenableAdapter } from './keenable/index.js';
 import { searxngAdapter } from './searxng/index.js';
 import { minimaxAdapter } from './minimax/index.js';
-import { minimaxCnAdapter } from './minimax/index.js';
 import { tinyfishAdapter } from './tinyfish/index.js';
 import { youAdapter } from './you/index.js';
 import { zhihuAdapter } from './zhihu/index.js';
@@ -18,9 +19,10 @@ import { deepseekAdapter } from './deepseek/index.js';
 import { zhipuAdapter } from './zhipu/index.js';
 import { zhipuCnAdapter } from './zhipu/index.js';
 export const ADAPTERS = [
+    minimaxCnAdapter,
+    keenableAdapter,
     searxngAdapter,
     minimaxAdapter,
-    minimaxCnAdapter,
     tinyfishAdapter,
     youAdapter,
     zhihuAdapter,

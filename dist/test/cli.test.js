@@ -25,8 +25,8 @@ providers:
     credentials: []
     account: {}
 `;
-// Adjudicated default priority order (free-quota size first); mirrors the registry.
-const DEFAULT_ORDER = ['searxng', 'minimax', 'minimax_cn', 'tinyfish', 'you', 'zhihu', 'anysearch', 'ollama', 'linkup', 'exa', 'metaso', 'firecrawl', 'tavily', 'brave', 'doubao', 'baidu', 'deepseek', 'zhipu_cn', 'zhipu'];
+// Adjudicated default priority order: minimax_cn first, Keenable second; mirrors the registry.
+const DEFAULT_ORDER = ['minimax_cn', 'keenable', 'searxng', 'minimax', 'tinyfish', 'you', 'zhihu', 'anysearch', 'ollama', 'linkup', 'exa', 'metaso', 'firecrawl', 'tavily', 'brave', 'doubao', 'baidu', 'deepseek', 'zhipu_cn', 'zhipu'];
 function sandbox(configText = CONFIG) {
     const dir = newTempDir('foragix-cli-');
     const configPath = join(dir, 'config.yaml');

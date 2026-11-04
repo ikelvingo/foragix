@@ -27,8 +27,8 @@ providers:
     account: {}
 `;
 
-// Adjudicated default priority order (free-quota size first); mirrors the registry.
-const DEFAULT_ORDER = ['searxng', 'minimax', 'minimax_cn', 'tinyfish', 'you', 'zhihu', 'anysearch', 'ollama', 'linkup', 'exa', 'metaso', 'firecrawl', 'tavily', 'brave', 'doubao', 'baidu', 'deepseek', 'zhipu_cn', 'zhipu'] as const;
+// Adjudicated default priority order: minimax_cn first, Keenable second; mirrors the registry.
+const DEFAULT_ORDER = ['minimax_cn', 'keenable', 'searxng', 'minimax', 'tinyfish', 'you', 'zhihu', 'anysearch', 'ollama', 'linkup', 'exa', 'metaso', 'firecrawl', 'tavily', 'brave', 'doubao', 'baidu', 'deepseek', 'zhipu_cn', 'zhipu'] as const;
 
 interface Sandbox {
   readonly dir: string;

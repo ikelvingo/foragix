@@ -1,6 +1,6 @@
 # foragix
 
-foragix is a web-search and page-fetch tool for AI agents: it pools the free quotas of 19 providers — whoever still has free quota goes first, and spent ones fail over automatically.
+foragix is a web-search and page-fetch tool for AI agents: it pools the free quotas of 20 providers — whoever still has free quota goes first, and spent ones fail over automatically.
 
 English | [简体中文](README.zh-CN.md)
 
@@ -36,32 +36,57 @@ Whichever way: the key value goes only to the environment or that file — the c
 
 ## Configuration reference
 
-The config file lives at `~/.foragix/config.yaml` (optional: omit it to use the built-in defaults; anything you write overrides them). Keys come from the ways above; the config file always names the variable and never holds the value.
+The config file lives at `~/.foragix/config.yaml` (optional: omit it to use the built-in defaults; anything you write overrides them). Keys come from the ways above; the config file always names the variable and never holds the value. The table below lists each provider's optional `account` settings; API keys go under `credentials` or in the environment, not `account`.
 
 ```yaml
 version: 1                     # only 1 is accepted
 providers:
-  - id: tavily                 # required; one of the 19 ids
+  - id: tavily                 # required; one of the 20 ids
     enabled: true              # default: true
     priority: 30               # overriding to 30; omit = list position ×10, lower runs first
     credentials:               # omit the whole block = each provider's own declared names
       - name: TAVILY_API_KEY   # the environment variable NAME, never the value
         required: true         # without the variable the provider is not used
-    account: {}                # only 6 providers have dedicated keys (8 ids), the other 11 stay empty
+    account: {}                # optional provider-specific settings; see the table below
   - id: minimax
     enabled: true              # default-off; turned on explicitly here
     account:
       base_url: https://api.minimax.io
 ```
 
-| provider | key | allowed values | default |
+| provider id | `account` key | What to enter | Default |
 | --- | --- | --- | --- |
-| `searxng` | `base_url` | instance URL | `https://search.ikelvin.space:8443` |
-| `minimax` / `minimax_cn` | `base_url` | `https://api.minimax.io` / `https://api.minimax.cn` | by id |
-| `zhipu` / `zhipu_cn` | `base_url` | `https://api.z.ai/api/paas/v4` / `https://open.bigmodel.cn/api/paas/v4` | by id |
-| `zhihu` | `db` | `zhihu` / `global` | `zhihu` |
-| `doubao` | `version` | `global` / `custom` | `global` |
-| `brave` | `capped_free` | `true` / `false` | `true` (the free tier rides on a saved card; `false` removes the local budget brake) |
+| `minimax_cn` | `base_url` | Optional MiniMax CN API host override | `https://api.minimax.cn` |
+| `keenable` | — | No provider-specific `account` setting | — |
+| `searxng` | `base_url` | URL of your SearXNG instance | `https://search.ikelvin.space:8443` |
+| `minimax` | `base_url` | Optional MiniMax API host override | `https://api.minimax.io` |
+| `tinyfish` | — | No provider-specific `account` setting | — |
+| `you` | — | No provider-specific `account` setting | — |
+| `zhihu` | `db` | `zhihu` calls the Zhihu site-search endpoint; `global` calls general search with `SearchDB=all` | `zhihu` |
+| `anysearch` | — | No provider-specific `account` setting | — |
+| `ollama` | — | No provider-specific `account` setting | — |
+| `linkup` | — | No provider-specific `account` setting | — |
+| `exa` | — | No provider-specific `account` setting | — |
+| `metaso` | — | No provider-specific `account` setting | — |
+| `firecrawl` | — | No provider-specific `account` setting | — |
+| `tavily` | — | No provider-specific `account` setting | — |
+| `brave` | `capped_free` | `true` keeps the local free-usage cap; `false` removes it | `true` |
+| `doubao` | `version` | `global` uses Global Search; `custom` uses Custom (Ruyi) Search | `global` |
+| `baidu` | — | No provider-specific `account` setting | — |
+| `deepseek` | — | No provider-specific `account` setting | — |
+| `zhipu_cn` | `base_url` | Optional Zhipu CN API host override | `https://open.bigmodel.cn/api/paas/v4` |
+| `zhipu` | `base_url` | Optional Zhipu API host override | `https://api.z.ai/api/paas/v4` |
+
+For example, to make the `zhihu` provider search the wider web, set `db` under its `account`:
+
+```yaml
+- id: zhihu
+  account:
+    db: global
+```
+
+Leave `account` empty or omit it to use the default shown above.
+An explicit `site:zhihu` on a search request always selects the Zhihu site-search endpoint, even when `db` is `global`.
 
 - A duplicate `id` or unknown top-level keys: startup is refused.
 - A wrong entry inside one provider (unknown key, unknown credential name, bad value): only that provider is isolated; the rest keep working.
@@ -76,9 +101,10 @@ Search counters are kept on this machine in `~/.foragix/`; upgrades and reinstal
 
 | id | credential variable | default |
 | --- | --- | --- |
+| `minimax_cn` | `MINIMAX_API_KEY` | false |
+| `keenable` | `KEENABLE_API_KEY` | true |
 | `searxng` | none | true |
 | `minimax` | `MINIMAX_GLOBAL_API_KEY` | false |
-| `minimax_cn` | `MINIMAX_API_KEY` | false |
 | `tinyfish` | `TINYFISH_API_KEY` | true |
 | `you` | `YDC_API_KEY` | true |
 | `zhihu` | `ZHIHU_API_KEY` | true |
@@ -95,6 +121,8 @@ Search counters are kept on this machine in `~/.foragix/`; upgrades and reinstal
 | `deepseek` | `DEEPSEEK_API_KEY` | false |
 | `zhipu_cn` | `ZHIPU_API_KEY` | false |
 | `zhipu` | `ZAI_API_KEY` | false |
+
+- `keenable`: 100,000 free search/fetch requests per month; purchased-credit behavior follows the Keenable account. See the [REST API docs](https://docs.keenable.ai/api-reference).
 
 ## Known limitations
 - Locally counted usage is an estimate; the provider's own refusal is the authority.

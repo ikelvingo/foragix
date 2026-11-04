@@ -6,10 +6,11 @@
  */
 import type { ProviderAdapter } from './types.js';
 import type { ProviderSchema, SchemaLookup } from '../config/types.js';
-import { searxngAdapter } from './searxng/index.js';
-
-import { minimaxAdapter } from './minimax/index.js';
 import { minimaxCnAdapter } from './minimax/index.js';
+import { keenableAdapter } from './keenable/index.js';
+
+import { searxngAdapter } from './searxng/index.js';
+import { minimaxAdapter } from './minimax/index.js';
 
 import { tinyfishAdapter } from './tinyfish/index.js';
 
@@ -43,9 +44,10 @@ import { zhipuAdapter } from './zhipu/index.js';
 import { zhipuCnAdapter } from './zhipu/index.js';
 
 export const ADAPTERS: readonly ProviderAdapter[] = [
+  minimaxCnAdapter,
+  keenableAdapter,
   searxngAdapter,
   minimaxAdapter,
-  minimaxCnAdapter,
   tinyfishAdapter,
   youAdapter,
   zhihuAdapter,

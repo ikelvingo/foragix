@@ -1,6 +1,6 @@
 {
   "name": "foragix",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Agent Skill for web search, page fetching, direct information lookup, and provider status across multiple providers, with pooled free quotas and automatic failover.",
   "type": "module",
   "engines": {
