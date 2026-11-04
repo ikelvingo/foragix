@@ -12,6 +12,11 @@ export TAVILY_API_KEY=<your key>
 ```
 Once installed, the agent uses it through `SKILL.md`; run `status` any time to check the install and missing keys.
 
+## System requirements
+
+- Node.js 22.5.0 or later (for the built-in `node:sqlite` used for local state; no separate SQLite installation is needed).
+- Network access to the APIs of the enabled providers.
+
 ## Tools provided by this skill
 
 - **`search`**: Search the web and return relevant pages with snippets.

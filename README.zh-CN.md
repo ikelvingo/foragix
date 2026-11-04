@@ -11,6 +11,11 @@ npx skills add ikelvingo/foragix -g
 export TAVILY_API_KEY=<你的key>
 ```
 
+## 系统要求
+
+- Node.js 22.5.0 或更高版本（本地状态使用内置的 `node:sqlite`，无需单独安装 SQLite）。
+- 网络能够访问已启用供应商的 API。
+
 ## 本 Skill 提供的工具
 
 - **`search`**：搜索网页，返回相关页面及摘要。
