@@ -49,7 +49,7 @@ The config file lives at `~/.foragix/config.yaml` (optional: omit it to use the 
 ```yaml
 version: 1                     # only 1 is accepted
 providers:
-  - id: tavily                 # required; one of the 20 ids
+  - id: tavily                 # required; one of the 21 ids
     enabled: true              # default: true
     priority: 30               # overriding to 30; omit = list position ×10, lower runs first
     credentials:               # omit the whole block = each provider's own declared names
@@ -73,6 +73,7 @@ providers:
 | `zhihu` | `db` | `zhihu` calls the Zhihu site-search endpoint; `global` calls general search with `SearchDB=all` | `zhihu` |
 | `anysearch` | — | No provider-specific `account` setting | — |
 | `ollama` | — | No provider-specific `account` setting | — |
+| `parallel` | — | No provider-specific `account` setting | — |
 | `linkup` | — | No provider-specific `account` setting | — |
 | `exa` | — | No provider-specific `account` setting | — |
 | `metaso` | — | No provider-specific `account` setting | — |
@@ -118,6 +119,7 @@ Search counters are kept on this machine in `~/.foragix/`; upgrades and reinstal
 | `zhihu` | `ZHIHU_API_KEY` | true |
 | `anysearch` | `ANYSEARCH_API_KEY` | true |
 | `ollama` | `OLLAMA_API_KEY` | true |
+| `parallel` | `PARALLEL_API_KEY` | true |
 | `linkup` | `LINKUP_API_KEY` | true |
 | `exa` | `EXA_API_KEY` | true |
 | `metaso` | `METASO_API_KEY` | true |
@@ -131,6 +133,7 @@ Search counters are kept on this machine in `~/.foragix/`; upgrades and reinstal
 | `zhipu` | `ZAI_API_KEY` | false |
 
 - `keenable`: 100,000 free search/fetch requests per month; purchased-credit behavior follows the Keenable account. See the [REST API docs](https://docs.keenable.ai/api-reference).
+- `parallel`: Search plus page extraction (the Extract API). Qualified organizations with a credit card receive a $5 credit each calendar month; it does not accumulate and unused balance expires at month end. At the fast-search and extract rates that is about 5,000 requests. `--site zhihu` is served through Parallel's native domain filter. See the [API docs](https://docs.parallel.ai).
 
 ## Known limitations
 - Locally counted usage is an estimate; the provider's own refusal is the authority.

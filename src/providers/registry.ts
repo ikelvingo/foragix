@@ -22,6 +22,8 @@ import { anysearchAdapter } from './anysearch/index.js';
 
 import { ollamaAdapter } from './ollama/index.js';
 
+import { parallelAdapter } from './parallel/index.js';
+
 import { linkupAdapter } from './linkup/index.js';
 
 import { exaAdapter } from './exa/index.js';
@@ -53,6 +55,7 @@ export const ADAPTERS: readonly ProviderAdapter[] = [
   zhihuAdapter,
   anysearchAdapter,
   ollamaAdapter,
+  parallelAdapter,
   linkupAdapter,
   exaAdapter,
   metasoAdapter,

@@ -48,7 +48,7 @@ export TAVILY_API_KEY=<你的key>
 ```yaml
 version: 1                     # 只接受 1
 providers:
-  - id: tavily                 # 必需，20 个 id 之一
+  - id: tavily                 # 必需，21 个 id 之一
     enabled: true              # 默认 true
     priority: 30               # 覆盖成 30；不写 = 列表位置 ×10，数值小者先试
     credentials:               # 整段不写 = 用该家自己声明的变量名
@@ -72,6 +72,7 @@ providers:
 | `zhihu` | `db` | `zhihu` 调用知乎站内搜索接口；`global` 调用全网搜索接口（`SearchDB=all`） | `zhihu` |
 | `anysearch` | — | 无专属 `account` 设置 | — |
 | `ollama` | — | 无专属 `account` 设置 | — |
+| `parallel` | — | 无专属 `account` 设置 | — |
 | `linkup` | — | 无专属 `account` 设置 | — |
 | `exa` | — | 无专属 `account` 设置 | — |
 | `metaso` | — | 无专属 `account` 设置 | — |
@@ -117,6 +118,7 @@ providers:
 | `zhihu` | `ZHIHU_API_KEY` | true |
 | `anysearch` | `ANYSEARCH_API_KEY` | true |
 | `ollama` | `OLLAMA_API_KEY` | true |
+| `parallel` | `PARALLEL_API_KEY` | true |
 | `linkup` | `LINKUP_API_KEY` | true |
 | `exa` | `EXA_API_KEY` | true |
 | `metaso` | `METASO_API_KEY` | true |
@@ -130,6 +132,7 @@ providers:
 | `zhipu` | `ZAI_API_KEY` | false |
 
 - `keenable`：每月 100,000 次免费搜索与抓取请求共用额度；免费额度用完后的购买额度由 Keenable 账户决定。详见 [REST API 文档](https://docs.keenable.ai/api-reference)。
+- `parallel`：支持搜索与正文提取（Extract API）。绑定信用卡的合格组织每个自然月自动获得 $5 额度，不可累积，月末未用余额作废；按 fast 搜索与 extract 单价折算约 5,000 次请求。`--site zhihu` 通过 Parallel 原生域名过滤实现。详见 [API 文档](https://docs.parallel.ai)。
 
 ## 已知限制
 - 本地记的用量只是估算，服务商自己的拒绝才算数。

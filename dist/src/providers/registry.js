@@ -7,6 +7,7 @@ import { youAdapter } from './you/index.js';
 import { zhihuAdapter } from './zhihu/index.js';
 import { anysearchAdapter } from './anysearch/index.js';
 import { ollamaAdapter } from './ollama/index.js';
+import { parallelAdapter } from './parallel/index.js';
 import { linkupAdapter } from './linkup/index.js';
 import { exaAdapter } from './exa/index.js';
 import { metasoAdapter } from './metaso/index.js';
@@ -28,6 +29,7 @@ export const ADAPTERS = [
     zhihuAdapter,
     anysearchAdapter,
     ollamaAdapter,
+    parallelAdapter,
     linkupAdapter,
     exaAdapter,
     metasoAdapter,

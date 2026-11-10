@@ -26,7 +26,7 @@ providers:
     account: {}
 `;
 // Adjudicated default priority order: minimax_cn first, Keenable second; mirrors the registry.
-const DEFAULT_ORDER = ['minimax_cn', 'keenable', 'searxng', 'minimax', 'tinyfish', 'you', 'zhihu', 'anysearch', 'ollama', 'linkup', 'exa', 'metaso', 'firecrawl', 'tavily', 'brave', 'doubao', 'baidu', 'deepseek', 'zhipu_cn', 'zhipu'];
+const DEFAULT_ORDER = ['minimax_cn', 'keenable', 'searxng', 'minimax', 'tinyfish', 'you', 'zhihu', 'anysearch', 'ollama', 'parallel', 'linkup', 'exa', 'metaso', 'firecrawl', 'tavily', 'brave', 'doubao', 'baidu', 'deepseek', 'zhipu_cn', 'zhipu'];
 function sandbox(configText = CONFIG) {
     const dir = newTempDir('foragix-cli-');
     const configPath = join(dir, 'config.yaml');
@@ -185,7 +185,7 @@ test('status succeeds offline and reports the provider as unusable without crede
         const providers = body['providers'];
         // The merge policy appends default entries for every adapter the fixture does not
         // declare, so the offline roster is the full registry.
-        assert.equal(providers.length, 19);
+        assert.equal(providers.length, 21);
         const tavily = providers.find((p) => p['id'] === 'tavily');
         assert.equal(tavily['usable'], false);
         assert.deepEqual(tavily['state'], ['credential_missing']);
