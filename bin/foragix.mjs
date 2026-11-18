@@ -8,7 +8,7 @@
  */
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const entry = join(here, '..', 'dist', 'src', 'cli.js');
@@ -48,7 +48,7 @@ if (!existsSync(entry)) {
 
   let selfHealed = false;
   try {
-    const { runCli } = await import(entry);
+    const { runCli } = await import(pathToFileURL(entry).href);
     process.exitCode = await runCli(process.argv.slice(2));
   } catch (err) {
     // The single runtime dependency (`yaml`) missing from an installed copy is the one

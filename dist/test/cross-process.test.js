@@ -10,12 +10,11 @@ import { spawnSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { SqliteAdapter } from '../src/db/sqlite.js';
 import { applySchema, writeSchemaVersion } from '../src/db/schema.js';
 import { BIT } from '../src/db/bits.js';
 const DDL = readFileSync(new URL('../../sql/schema.sql', import.meta.url), 'utf8');
-const SQLITE_URL = fileURLToPath(new URL('../src/db/sqlite.js', import.meta.url));
+const SQLITE_URL = new URL('../src/db/sqlite.js', import.meta.url).href;
 /** One worker: repeatedly set a bit, count usage, clear the bit, each inside one transaction. */
 const WORKER = (dbPath, rounds) => `
 import { SqliteAdapter } from ${JSON.stringify(SQLITE_URL)};

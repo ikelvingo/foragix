@@ -10,8 +10,8 @@ import { applySchema, writeSchemaVersion } from '../src/db/schema.js';
 import { readObserved } from '../src/state/usage.js';
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const DDL = readFileSync(join(ROOT, 'sql/schema.sql'), 'utf8');
-const SQLITE = JSON.stringify(join(ROOT, 'dist/src/db/sqlite.js'));
-const USAGE = JSON.stringify(join(ROOT, 'dist/src/state/usage.js'));
+const SQLITE = JSON.stringify(new URL('../src/db/sqlite.js', import.meta.url).href);
+const USAGE = JSON.stringify(new URL('../src/state/usage.js', import.meta.url).href);
 const INCREMENTS = 40;
 function work(dbPath) {
     const script = `
